@@ -103,9 +103,9 @@ int main(int argc, char *argv[]) {
       KALDI_ERR << "Could not open table for writing lattices: "
                  << lattice_wspecifier;
 
-    RandomAccessBaseFloatMatrixReader online_ivector_reader(
+    RandomAccessBaseFloatCuMatrixReader online_ivector_reader(
         online_ivector_rspecifier);
-    RandomAccessBaseFloatVectorReaderMapped ivector_reader(
+    RandomAccessBaseFloatCuVectorReaderMapped ivector_reader(
         ivector_rspecifier, utt2spk_rspecifier);
 
     Int32VectorWriter words_writer(words_wspecifier);
@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
     int num_success = 0, num_fail = 0;
 
     if (ClassifyRspecifier(fst_in_str, NULL, NULL) == kNoRspecifier) {
-      SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
+      SequentialBaseFloatCuMatrixReader feature_reader(feature_rspecifier);
 
       // Input FST is just one FST, not a table of FSTs.
       VectorFst<StdArc> *decode_fst = fst::ReadFstKaldi(fst_in_str);
@@ -132,14 +132,14 @@ int main(int argc, char *argv[]) {
 
         for (; !feature_reader.Done(); feature_reader.Next()) {
           std::string utt = feature_reader.Key();
-          const Matrix<BaseFloat> &features (feature_reader.Value());
+          const CuMatrix<BaseFloat> &features (feature_reader.Value());
           if (features.NumRows() == 0) {
             KALDI_WARN << "Zero-length utterance: " << utt;
             num_fail++;
             continue;
           }
-          const Matrix<BaseFloat> *online_ivectors = NULL;
-          const Vector<BaseFloat> *ivector = NULL;
+          const CuMatrix<BaseFloat> *online_ivectors = NULL;
+          const CuVector<BaseFloat> *ivector = NULL;
           if (!ivector_rspecifier.empty()) {
             if (!ivector_reader.HasKey(utt)) {
               KALDI_WARN << "No iVector available for utterance " << utt;
@@ -180,7 +180,7 @@ int main(int argc, char *argv[]) {
       delete decode_fst; // delete this only after decoder goes out of scope.
     } else { // We have different FSTs for different utterances.
       SequentialTableReader<fst::VectorFstHolder> fst_reader(fst_in_str);
-      RandomAccessBaseFloatMatrixReader feature_reader(feature_rspecifier);
+      RandomAccessBaseFloatCuMatrixReader feature_reader(feature_rspecifier);
       for (; !fst_reader.Done(); fst_reader.Next()) {
         std::string utt = fst_reader.Key();
         if (!feature_reader.HasKey(utt)) {
@@ -189,7 +189,7 @@ int main(int argc, char *argv[]) {
           num_fail++;
           continue;
         }
-        const Matrix<BaseFloat> &features = feature_reader.Value(utt);
+        const CuMatrix<BaseFloat> &features = feature_reader.Value(utt);
         if (features.NumRows() == 0) {
           KALDI_WARN << "Zero-length utterance: " << utt;
           num_fail++;
@@ -198,8 +198,8 @@ int main(int argc, char *argv[]) {
 
         LatticeFasterDecoder decoder(fst_reader.Value(), config);
 
-        const Matrix<BaseFloat> *online_ivectors = NULL;
-        const Vector<BaseFloat> *ivector = NULL;
+        const CuMatrix<BaseFloat> *online_ivectors = NULL;
+        const CuVector<BaseFloat> *ivector = NULL;
         if (!ivector_rspecifier.empty()) {
           if (!ivector_reader.HasKey(utt)) {
             KALDI_WARN << "No iVector available for utterance " << utt;

@@ -26,7 +26,7 @@ tmpdir=data/local/lm_tmp
 lexicon=data/local/lang_tmp/lexiconp.txt
 mkdir -p $tmpdir
 
-for x in si_tr si_dt; do
+for x in si_tr si_dt si_et; do
   mkdir -p data/$x
   cp $srcdir/${x}_wav.scp data/$x/wav.scp || exit 1;
   cp $srcdir/$x.txt data/$x/text || exit 1;
@@ -55,7 +55,7 @@ for lm_suffix in bg_5k tg_5k; do
   # grep -v '<s> <s>' because the LM seems to have some strange and useless
   # stuff in it with multiple <s>'s in the history.  Encountered some other similar
   # things in a LM from Geoff.  Removing all "illegal" combinations of <s> and </s>,
-  # which are supposed to occur only at being/end of utt.  These can cause 
+  # which are supposed to occur only at being/end of utt.  These can cause
   # determinization failures of CLG [ends up being epsilon cycles].
   gunzip -c $lmdir/lm_${lm_suffix}.arpa.gz | \
     grep -v '<s> <s>' | \
@@ -83,7 +83,7 @@ for lm_suffix in bg_5k tg_5k; do
     < "$lexicon"  >$tmpdir/g/select_empty.fst.txt
   fstcompile --isymbols=$test/words.txt --osymbols=$test/words.txt $tmpdir/g/select_empty.fst.txt | \
    fstarcsort --sort_type=olabel | fstcompose - $test/G.fst > $tmpdir/g/empty_words.fst
-  fstinfo $tmpdir/g/empty_words.fst | grep cyclic | grep -w 'y' && 
+  fstinfo $tmpdir/g/empty_words.fst | grep cyclic | grep -w 'y' &&
     echo "Language model has cycles with empty words" && exit 1
   rm -r $tmpdir/g
 done

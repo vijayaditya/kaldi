@@ -6,9 +6,13 @@
 # the number of cpus on your machine.
 
 #a) JHU cluster options
-export train_cmd="queue.pl -l arch=*64,gpu=1 -q g.q"
-export decode_cmd="queue.pl -l arch=*64,mem_free=2G,ram_free=2G"
-export mkgraph_cmd="queue.pl -l arch=*64,ram_free=4G,mem_free=4G"
+if [ "$(hostname -d)" == "clsp.jhu.edu" ]; then
+  export train_cmd="queue.pl -l arch=*64"
+  export decode_cmd="queue.pl -l arch=*64 --mem 2G"
+  export mkgraph_cmd="queue.pl -l arch=*64 --mem 4G"
+  export cuda_cmd="queue.pl --gpu 1 --mem 20G"
+
+fi
 
 #export cuda_cmd="..."
 

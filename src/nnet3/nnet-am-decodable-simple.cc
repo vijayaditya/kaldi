@@ -27,9 +27,9 @@ DecodableAmNnetSimple::DecodableAmNnetSimple(
     const DecodableAmNnetSimpleOptions &opts,
     const TransitionModel &trans_model,
     const AmNnetSimple &am_nnet,
-    const MatrixBase<BaseFloat> &feats,
-    const VectorBase<BaseFloat> *ivector,
-    const MatrixBase<BaseFloat> *online_ivectors,
+    const CuMatrixBase<BaseFloat> &feats,
+    const CuVectorBase<BaseFloat> *ivector,
+    const CuMatrixBase<BaseFloat> *online_ivectors,
     int32 online_ivector_period):
     opts_(opts),
     trans_model_(trans_model),
@@ -51,8 +51,8 @@ DecodableAmNnetSimple::DecodableAmNnetSimple(
     const DecodableAmNnetSimpleOptions &opts,
     const TransitionModel &trans_model,
     const AmNnetSimple &am_nnet,
-    const MatrixBase<BaseFloat> &feats,
-    const MatrixBase<BaseFloat> &ivectors,
+    const CuMatrixBase<BaseFloat> &feats,
+    const CuMatrixBase<BaseFloat> &ivectors,
     int32 online_ivector_period):
     opts_(opts),
     trans_model_(trans_model),
@@ -72,8 +72,8 @@ DecodableAmNnetSimple::DecodableAmNnetSimple(
     const DecodableAmNnetSimpleOptions &opts,
     const TransitionModel &trans_model,
     const AmNnetSimple &am_nnet,
-    const MatrixBase<BaseFloat> &feats,
-    const VectorBase<BaseFloat> &ivector):
+    const CuMatrixBase<BaseFloat> &feats,
+    const CuVectorBase<BaseFloat> &ivector):
     opts_(opts),
     trans_model_(trans_model),
     am_nnet_(am_nnet),
@@ -138,25 +138,25 @@ void DecodableAmNnetSimple::EnsureFrameIsComputed(int32 frame) {
   int32 first_input_frame = start_output_frame - left_context,
       num_input_frames = left_context + num_output_frames +
                          am_nnet_.RightContext();
-  Vector<BaseFloat> ivector;
+  CuVector<BaseFloat> ivector;
   GetCurrentIvector(start_output_frame, num_output_frames, &ivector);
 
-  Matrix<BaseFloat> input_feats;
+  CuMatrix<BaseFloat> input_feats;
   if (first_input_frame >= 0 &&
       first_input_frame + num_input_frames <= feats_.NumRows()) {
-    SubMatrix<BaseFloat> input_feats(feats_.RowRange(first_input_frame,
+    CuSubMatrix<BaseFloat> input_feats(feats_.RowRange(first_input_frame,
                                                      num_input_frames));
     DoNnetComputation(first_input_frame, input_feats, ivector,
                       start_output_frame, num_output_frames);
   } else {
-    Matrix<BaseFloat> feats_block(num_input_frames, feats_.NumCols());
+    CuMatrix<BaseFloat> feats_block(num_input_frames, feats_.NumCols());
     int32 tot_input_feats = feats_.NumRows();
     for (int32 i = 0; i < num_input_frames; i++) {
-      SubVector<BaseFloat> dest(feats_block, i);
+      CuSubVector<BaseFloat> dest(feats_block, i);
       int32 t = i + first_input_frame;
       if (t < 0) t = 0;
       if (t >= tot_input_feats) t = tot_input_feats - 1;
-      const SubVector<BaseFloat> src(feats_, t);
+      const CuSubVector<BaseFloat> src(feats_, t);
       dest.CopyFromVec(src);
     }
     DoNnetComputation(first_input_frame, feats_block, ivector,
@@ -166,7 +166,7 @@ void DecodableAmNnetSimple::EnsureFrameIsComputed(int32 frame) {
 
 void DecodableAmNnetSimple::GetCurrentIvector(int32 output_t_start,
                                               int32 num_output_frames,
-                                              Vector<BaseFloat> *ivector) {
+                                              CuVector<BaseFloat> *ivector) {
   if (ivector_ != NULL) {
     *ivector = *ivector_;
     return;
@@ -200,8 +200,8 @@ void DecodableAmNnetSimple::GetCurrentIvector(int32 output_t_start,
 
 void DecodableAmNnetSimple::DoNnetComputation(
     int32 input_t_start,
-    const MatrixBase<BaseFloat> &input_feats,
-    const VectorBase<BaseFloat> &ivector,
+    const CuMatrixBase<BaseFloat> &input_feats,
+    const CuVectorBase<BaseFloat> &ivector,
     int32 output_t_start,
     int32 num_output_frames) {
   ComputationRequest request;

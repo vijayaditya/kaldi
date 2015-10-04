@@ -84,9 +84,9 @@ class DecodableAmNnetSimple: public DecodableInterface {
   DecodableAmNnetSimple(const DecodableAmNnetSimpleOptions &opts,
                         const TransitionModel &trans_model,
                         const AmNnetSimple &am_nnet,
-                        const MatrixBase<BaseFloat> &feats,
-                        const VectorBase<BaseFloat> *ivector = NULL,
-                        const MatrixBase<BaseFloat> *online_ivectors = NULL,
+                        const CuMatrixBase<BaseFloat> &feats,
+                        const CuVectorBase<BaseFloat> *ivector = NULL,
+                        const CuMatrixBase<BaseFloat> *online_ivectors = NULL,
                         int32 online_ivector_period = 1);
 
   /// Constructor that also accepts iVectors estimated online;
@@ -94,16 +94,16 @@ class DecodableAmNnetSimple: public DecodableInterface {
   DecodableAmNnetSimple(const DecodableAmNnetSimpleOptions &opts,
                         const TransitionModel &trans_model,
                         const AmNnetSimple &am_nnet,
-                        const MatrixBase<BaseFloat> &feats,
-                        const MatrixBase<BaseFloat> &online_ivectors,
+                        const CuMatrixBase<BaseFloat> &feats,
+                        const CuMatrixBase<BaseFloat> &online_ivectors,
                         int32 online_ivector_period);
 
   /// Constructor that accepts iVectors estimated in batch mode
   DecodableAmNnetSimple(const DecodableAmNnetSimpleOptions &opts,
                         const TransitionModel &trans_model,
                         const AmNnetSimple &am_nnet,
-                        const MatrixBase<BaseFloat> &feats,
-                        const VectorBase<BaseFloat> &ivector);
+                        const CuMatrixBase<BaseFloat> &feats,
+                        const CuVectorBase<BaseFloat> &ivector);
 
 
   // Note, frames are numbered from zero.  But transition_id is numbered
@@ -132,15 +132,15 @@ class DecodableAmNnetSimple: public DecodableInterface {
   // the caller of this function (so the input should exceed the output
   // by a suitable amount of context).  It puts its output in current_log_post_.
   void DoNnetComputation(int32 input_t_start,
-                         const MatrixBase<BaseFloat> &input_feats,
-                         const VectorBase<BaseFloat> &ivector,
+                         const CuMatrixBase<BaseFloat> &input_feats,
+                         const CuVectorBase<BaseFloat> &ivector,
                          int32 output_t_start,
                          int32 num_output_frames);
 
   // Gets the iVector that will be used for this chunk of frames, if
   // we are using iVectors (else does nothing).
   void GetCurrentIvector(int32 output_t_start, int32 num_output_frames,
-                         Vector<BaseFloat> *ivector);
+                         CuVector<BaseFloat> *ivector);
 
   void PossiblyWarnForFramesPerChunk() const;
 
@@ -151,14 +151,14 @@ class DecodableAmNnetSimple: public DecodableInterface {
   const TransitionModel &trans_model_;
   const AmNnetSimple &am_nnet_;
   CuVector<BaseFloat> priors_;
-  const MatrixBase<BaseFloat> &feats_;
+  const CuMatrixBase<BaseFloat> &feats_;
 
   // ivector_ is the iVector if we're using iVectors that are estimated in batch
   // mode.
-  const VectorBase<BaseFloat> *ivector_;
+  const CuVectorBase<BaseFloat> *ivector_;
 
   // online_ivector_feats_ is the iVectors if we're using online-estimated ones.
-  const MatrixBase<BaseFloat> *online_ivector_feats_;
+  const CuMatrixBase<BaseFloat> *online_ivector_feats_;
   // online_ivector_period_ helps us interpret online_ivector_feats_; it's the
   // number of frames the rows of ivector_feats are separated by.
   int32 online_ivector_period_;
@@ -168,7 +168,7 @@ class DecodableAmNnetSimple: public DecodableInterface {
 
   // The current log-posteriors that we got from the last time we
   // ran the computation.
-  Matrix<BaseFloat> current_log_post_;
+  CuMatrix<BaseFloat> current_log_post_;
   // The time-offset of the current log-posteriors.
   int32 current_log_post_offset_;
 
