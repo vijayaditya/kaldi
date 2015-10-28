@@ -208,6 +208,134 @@ void GenerateConfigSequenceRnn(
   configs->push_back(os.str());
 }
 
+void GenerateConfigSequenceClockworkRnn(
+    const NnetGenerationOptions &opts,
+    std::vector<std::string> *configs) {
+  std::ostringstream os;
+  KALDI_LOG << "Genrating clockwork RNN";
+  std::vector<int32> splice_context;
+  for (int32 i = -5; i < 4; i++)
+    if (Rand() % 3 == 0)
+      splice_context.push_back(i);
+  if (splice_context.empty())
+    splice_context.push_back(0);
+
+  int32 input_dim = 10 + Rand() % 20,
+      spliced_dim = input_dim * splice_context.size(),
+      output_dim = 100 + Rand() % 200,
+      hidden_dim = 40 + Rand() % 50;
+  int32 num_rates = 1 + Rand() % 2;
+  int32 time_period_upper_bound = std::max(2 * num_rates, 5);
+  int32 exponential_rates = Rand() % 2;
+
+  // we store time periods as they are integers and
+  // convenient for naming variables
+  // nnet3 : doesnot allow "." in names
+  std::vector<int32> time_periods(num_rates);
+  if (exponential_rates == 0)  {
+    for (int32 i = 0; i < num_rates; i++) {
+      time_periods[i] =  std::pow<int32>(2, i);
+    }
+  } else  {
+    time_periods[0] = 1;
+    std::set<int32> time_period_set;
+    while (time_period_set.size() < num_rates) {
+      time_period_set.insert(1 + Rand() % time_period_upper_bound);
+    }
+    int32 index = 1;
+    for ( std::set<int32>::iterator iter = time_period_set.begin(); iter != time_period_set.end(); ++iter)
+      time_periods[index++] = *iter;
+  }
+
+  std::ostringstream temp_string_stream;
+  for (size_t i = 0; i < splice_context.size(); i++) {
+    int32 offset = splice_context[i];
+    temp_string_stream << "Offset(input, " << offset << ")";
+    if (i + 1 < splice_context.size())
+      temp_string_stream << ", ";
+  }
+  std::string spliced_input = temp_string_stream.str();
+
+  temp_string_stream.clear();
+  temp_string_stream.str("");
+
+  std::string nonlinearity;
+  if (RandInt(0, 1) == 0) {
+    temp_string_stream <<"RectifiedLinearComponent";
+    nonlinearity = temp_string_stream.str();
+  } else {
+    temp_string_stream << "TanhComponent";
+    nonlinearity = temp_string_stream.str();
+  }
+
+  std::sort(time_periods.begin(), time_periods.end());
+  std::vector<std::string> rate_unit_output_descriptors;
+  for (int32 i = 1; i < num_rates; i++) {
+    os << "component name=affineT" << time_periods[i]
+       << " type=NaturalGradientAffineComponent input-dim="
+       << spliced_dim << " output-dim=" << hidden_dim << std::endl;
+    os << "component name=recurrentAffineT" << time_periods[i]
+       << " type=NaturalGradientAffineComponent input-dim="
+       << (rate_unit_output_descriptors.size() + 1) * hidden_dim
+       << " output-dim=" << hidden_dim << std::endl;;
+    os << "component name=nonlinT" << time_periods[i]
+       << " type=" << nonlinearity << " dim="
+       << hidden_dim << std::endl;
+
+    os << "component-node name=affineT"<< time_periods[i]
+       << " component=affineT" << time_periods[i]
+       << " input=Append(" << spliced_input << ")\n";
+    os << "component-node name=recurrentAffineT" << time_periods[i]
+       << " component=recurrentAffineT" << time_periods[i]
+       << " input=Offset(nonlinT" << time_periods[i] << ", "
+       << -1*time_periods[i] << ")\n";
+    os << "component-node name=nonlinT" << time_periods[i]
+       << " component=nonlinT" << time_periods[i]
+       << " input=Sum(affineT" << time_periods[i]
+       << " , recurrentAffineT" << time_periods[i] << ")\n";
+
+    temp_string_stream.clear();
+    temp_string_stream.str("");
+    temp_string_stream << "IfDefined(Offset(nonlin_T0, -1))";
+    for (int32 i = 0; i < num_rates - 1; i++) {
+      temp_string_stream <<  ", " << rate_unit_output_descriptors[i];
+    }
+  }
+
+  os << "component name=affineT0"
+      << " type=NaturalGradientAffineComponent input-dim="
+      << spliced_dim << " output-dim=" << hidden_dim << std::endl;
+  os << "component name=recurrent_affineT0 type=NaturalGradientAffineComponent "
+     << " input-dim=" <<  (rate_unit_output_descriptors.size() + 1) * hidden_dim
+     << " output-dim=" << hidden_dim << std::endl;
+  os << "component name=nonlin_T0 type=" << nonlinearity
+     << " dim=" << (hidden_dim) << std::endl;
+  os << "component name=final_affine type=NaturalGradientAffineComponent "
+     << " input-dim=" << hidden_dim
+     << " output-dim=" << output_dim << std::endl;
+  os << "component name=logsoftmax type=LogSoftmaxComponent dim="
+     << output_dim << std::endl;
+  os << "input-node name=input dim=" << input_dim << std::endl;
+
+  temp_string_stream.clear();
+  temp_string_stream.str("");
+  temp_string_stream << "IfDefined(Offset(nonlin_T0, -1))";
+  for (int32 i = 0; i < num_rates - 1; i++) {
+    temp_string_stream <<  ", " << rate_unit_output_descriptors[i];
+  }
+  std::string clockwork_output =  temp_string_stream.str();
+  os << "component-node name=affineT0 component=affineT0 "
+        "input=Append(" << spliced_input << ")\n";
+  os << "component-node name=recurrentAffineT0 component=recurrent_affineT0 "
+     << "input=Append(" << clockwork_output << ")\n";
+  os << "component-node name=nonlin_T0 component=nonlin_T0 "
+     << "input=Sum(affineT0, IfDefined(recurrentAffineT0)) \n";
+  os << "component-node name=final_affine component=final_affine input=nonlin_T0\n";
+  os << "component-node name=output_nonlin component=logsoftmax input=final_affine\n";
+  os << "output-node name=output input=output_nonlin\n";
+  configs->push_back(os.str());
+  KALDI_LOG << configs->back();
+}
 
 
 // This generates a config sequence for what I *think* is a clockwork RNN, in
@@ -270,7 +398,6 @@ void GenerateConfigSequenceRnnClockwork(
 }
 
 
-
 // This generates a single config corresponding to an LSTM.
 // based on the equations in
 // Sak et. al. "LSTM based RNN architectures for LVCSR", 2014
@@ -320,7 +447,8 @@ void GenerateConfigSequenceLstm(
       spliced_dim = input_dim * splice_context.size(),
       output_dim = 100 + Rand() % 200,
       cell_dim = 40 + Rand() % 50,
-      projection_dim = std::ceil(cell_dim / (Rand() % 10 + 1));
+      projection_dim = std::ceil(cell_dim / (Rand() % 10 + 1)),
+      delay = RandInt(-5, -1);
 
   os << "input-node name=input dim=" << input_dim << std::endl;
 
@@ -402,26 +530,29 @@ void GenerateConfigSequenceLstm(
       temp_string_stream << ", ";
   }
   std::string spliced_input = temp_string_stream.str();
-
-  std::string c_tminus1 = "Sum(IfDefined(Offset(c1_t, -1)), IfDefined(Offset( c2_t, -1)))";
+  temp_string_stream.clear();
+  temp_string_stream.str("");
+  temp_string_stream << "Sum(IfDefined(Offset(c1_t, " << delay
+                     << ")), IfDefined(Offset( c2_t, " << delay << ")))";
+  std::string c_tminus1 = temp_string_stream.str();
 
   // i_t
   os << "component-node name=i1 component=Wi-xr input=Append("
-     << spliced_input << ", IfDefined(Offset(r_t, -1)))\n";
+     << spliced_input << ", IfDefined(Offset(r_t, " << delay << ")))\n";
   os << "component-node name=i2 component=Wic "
      << " input=" << c_tminus1 << std::endl;
   os << "component-node name=i_t component=i input=Sum(i1, i2)\n";
 
   // f_t
   os << "component-node name=f1 component=Wf-xr input=Append("
-     << spliced_input << ", IfDefined(Offset(r_t, -1)))\n";
+     << spliced_input << ", IfDefined(Offset(r_t, " << delay << ")))\n";
   os << "component-node name=f2 component=Wfc "
      << " input=" << c_tminus1 << std::endl;
   os << "component-node name=f_t component=f input=Sum(f1, f2)\n";
 
   // o_t
   os << "component-node name=o1 component=Wo-xr input=Append("
-     << spliced_input << ", IfDefined(Offset(r_t, -1)))\n";
+     << spliced_input << ", IfDefined(Offset(r_t, " << delay << ")))\n";
   os << "component-node name=o2 component=Woc input=Sum(c1_t, c2_t)\n";
   os << "component-node name=o_t component=o input=Sum(o1, o2)\n";
 
@@ -430,7 +561,7 @@ void GenerateConfigSequenceLstm(
 
   // g_t
   os << "component-node name=g1 component=Wc-xr input=Append("
-     << spliced_input << ", IfDefined(Offset(r_t, -1)))\n";
+     << spliced_input << ", IfDefined(Offset(r_t, " << delay << ")))\n";
   os << "component-node name=g_t component=g input=g1\n";
 
   // parts of c_t
@@ -710,7 +841,7 @@ start:
       if (!opts.allow_recursion || !opts.allow_context ||
           !opts.allow_nonlinearity)
         goto start;
-      GenerateConfigSequenceLstm(opts, configs);
+      GenerateConfigSequenceClockworkRnn(opts, configs);
       break;
     case 6:
       if (!opts.allow_recursion || !opts.allow_context ||

@@ -411,6 +411,12 @@ class NaturalGradientAffineComponent: public AffineComponent {
             BaseFloat num_samples_history,
             BaseFloat alpha, BaseFloat max_change_per_sample,
             std::string matrix_filename);
+  void Init(BaseFloat learning_rate,
+           int32 input_dim, int32 output_dim,
+           int32 rank_in, int32 rank_out,
+           int32 update_period, BaseFloat num_samples_history, BaseFloat alpha,
+           BaseFloat max_change_per_sample,
+           BaseFloat diag_init_scaling_factor);
 
   virtual void Resize(int32 input_dim, int32 output_dim);
   virtual void InitFromConfig(ConfigLine *cfl);
@@ -983,7 +989,7 @@ class NaturalGradientPerElementScaleComponent: public PerElementScaleComponent {
 };
 
 /**
- * ConvolutionalComponent implements 2d-convolution.
+ * ConvolutionComponent implements 2d-convolution.
  * It uses 3D filters on 3D inputs, but the 3D filters hop only over
  * 2 dimensions as it has same size as the input along the 3rd dimension.
  * Input : A matrix where each row is a  vectorized 3D-tensor.
@@ -1071,7 +1077,8 @@ class ConvolutionComponent: public UpdatableComponent {
     int32 filt_x_dim, int32 filt_y_dim,
     int32 filt_x_step, int32 filt_y_step,
     TensorVectorizationType input_vectorization,
-    BaseFloat learning_rate);
+    BaseFloat learning_rate,
+    bool is_updatable);
 
   virtual int32 InputDim() const;
   virtual int32 OutputDim() const;
@@ -1080,8 +1087,13 @@ class ConvolutionComponent: public UpdatableComponent {
   virtual void InitFromConfig(ConfigLine *cfl);
   virtual std::string Type() const { return "ConvolutionComponent"; }
   virtual int32 Properties() const {
-    return kSimpleComponent|kUpdatableComponent|kBackpropNeedsInput|
-	    kBackpropAdds|kPropagateAdds;
+    if (is_updatable_)  {
+      return kSimpleComponent|kUpdatableComponent|kBackpropNeedsInput|
+	      kBackpropAdds|kPropagateAdds;
+    } else  {
+      return kSimpleComponent|kBackpropNeedsInput|
+	      kBackpropAdds|kPropagateAdds;
+    }
   }
 
   virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
@@ -1122,6 +1134,7 @@ class ConvolutionComponent: public UpdatableComponent {
   const CuVector<BaseFloat> &BiasParams() { return bias_params_; }
   const CuMatrix<BaseFloat> &LinearParams() { return filter_params_; }
   void Init(BaseFloat learning_rate,
+            bool is_updatable,
             int32 input_x_dim, int32 input_y_dim, int32 input_z_dim,
             int32 filt_x_dim, int32 filt_y_dim,
             int32 filt_x_step, int32 filt_y_step, int32 num_filters,
@@ -1130,15 +1143,12 @@ class ConvolutionComponent: public UpdatableComponent {
   // there is no filt_z_dim parameter as the length of the filter along
   // z-dimension is same as the input
   void Init(BaseFloat learning_rate,
+            bool is_updatable,
             int32 input_x_dim, int32 input_y_dim, int32 input_z_dim,
             int32 filt_x_dim, int32 filt_y_dim,
             int32 filt_x_step, int32 filt_y_step,
             TensorVectorizationType input_vectorization,
             std::string matrix_filename);
-
-  // resize the component, setting the parameters to zero, while
-  // leaving any other configuration values the same
-  void Resize(int32 input_dim, int32 output_dim);
 
   void Update(const std::string &debug_info,
 	      const CuMatrixBase<BaseFloat> &in_value,
@@ -1171,6 +1181,7 @@ class ConvolutionComponent: public UpdatableComponent {
                         // before computing the next dot-product of the filter
                         // and input
 
+  bool has_bias_;
   // there is no filt_z_step_ as only dot product is possible along this axis
 
   TensorVectorizationType input_vectorization_; // type of vectorization of the
@@ -1187,7 +1198,6 @@ class ConvolutionComponent: public UpdatableComponent {
   CuVector<BaseFloat> bias_params_;
   // the filter-specific bias vector (i.e., there is a seperate bias added
   // to the output of each filter).
-  bool is_gradient_;
 
   void InputToInputPatches(const CuMatrixBase<BaseFloat>& in,
                            CuMatrix<BaseFloat> *patches) const;
@@ -1297,7 +1307,7 @@ class Convolutional1dComponent: public UpdatableComponent {
   void Init(BaseFloat learning_rate, int32 input_dim, int32 output_dim,
             int32 patch_dim, int32 patch_step, int32 patch_stride,
             BaseFloat param_stddev, BaseFloat bias_stddev);
-  void Init(BaseFloat learning_rate,
+  void Init(BaseFloat learning_rate, int32 input_dim, int32 output_dim,
             int32 patch_dim, int32 patch_step, int32 patch_stride,
             std::string matrix_filename);
 

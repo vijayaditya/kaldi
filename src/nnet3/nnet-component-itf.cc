@@ -129,11 +129,12 @@ bool Component::IsComputable(const MiscComputationInfo &misc_info,
   return true;
 }
 
-
-
-void UpdatableComponent::Init(BaseFloat lr, bool is_gradient) {
+void UpdatableComponent::Init(BaseFloat lr,
+                              bool is_gradient,
+                              bool is_updatable) {
   learning_rate_ = lr;
   is_gradient_ = is_gradient;
+  is_updatable_ = is_updatable;
 }
 
 std::string UpdatableComponent::Info() const {
@@ -143,6 +144,8 @@ std::string UpdatableComponent::Info() const {
          << LearningRate();
   if (is_gradient_)
     stream << ", is-gradient=true";
+  if (!is_updatable_)
+    stream << ", is_updatable=false";
   return stream.str();
 }
 
