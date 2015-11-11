@@ -21,7 +21,7 @@ if [ "$speed_perturb" == "true" ]; then
     for datadir in train_nodup; do
       utils/perturb_data_dir_speed.sh 0.9 data/${datadir} data/temp1
       utils/perturb_data_dir_speed.sh 1.1 data/${datadir} data/temp2
-      utils/combine_data.sh --extra-files utt2uniq data/${datadir}_tmp data/temp1 data/temp2
+      utils/combine_data.sh data/${datadir}_tmp data/temp1 data/temp2
       rm -r data/temp1 data/temp2
 
       mfccdir=mfcc_perturbed
