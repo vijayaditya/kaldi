@@ -343,7 +343,6 @@ num_archives=$(cat $egs_dir/info/num_archives) || { echo "error: no such file $e
 [ $num_jobs_final -gt $num_archives ] && \
   echo "$0: --final-num-jobs cannot exceed #archives $num_archives." && exit 1;
 
-false && {
 if [ $stage -le -3 ]; then
   echo "$0: getting preconditioning matrix for input features."
   num_lda_jobs=$num_archives
@@ -390,7 +389,7 @@ if [ $stage -le -2 ]; then
      $dir/pdf_counts > $dir/presoftmax_prior_scale.vec
   ln -sf ../presoftmax_prior_scale.vec $dir/configs/presoftmax_prior_scale.vec
 fi
-}
+
 if [ $stage -le -1 ]; then
   # Add the first layer; this will add in the lda.mat and
   # presoftmax_prior_scale.vec.

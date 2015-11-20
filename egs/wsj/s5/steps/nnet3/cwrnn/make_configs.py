@@ -101,6 +101,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--subsample", type=str,
                         help="if true subsample the clockwork units, else operate at the same rate ", default="true", choices = ["false", "true"])
+    parser.add_argument("--use-lstm", type=str,
+                        help="if true clockwork units will be chosen to be LSTMs rather than simple RNNs", default="true", choices = ["false", "true"])
     # Natural gradient options
     parser.add_argument("--ng-per-element-scale-options", type=str,
                         help="options to be supplied to NaturalGradientPerElementScaleComponent", default="")
@@ -145,6 +147,9 @@ if __name__ == "__main__":
     subsample = True
     if (args.subsample == "false"):
         subsample = False
+    use_lstm = False
+    if (args.use_lstm == "true"):
+        use_lstm = True
     if args.ratewise_params is None:
         ratewise_params = {'T1': {'rate':1, 'dim':512},
                            'T2': {'rate':1.0/2, 'dim':256},
@@ -196,6 +201,7 @@ if __name__ == "__main__":
                                                                     input_type = input_type,
                                                                     subsample = subsample,
                                                                     diag_init_scaling_factor = args.diag_init_scaling_factor,
+                                                                    use_lstm = use_lstm,
                                                                     projection_dim = args.projection_dim)
         if input_type in set(["stack", "sum"]):
             extra_left_context += largest_time_period
