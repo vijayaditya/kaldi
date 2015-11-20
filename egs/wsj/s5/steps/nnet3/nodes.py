@@ -31,7 +31,6 @@ def WriteKaldiMatrix(matrix, matrix_file_name):
             matrix_file.write('\n')
     matrix_file.close()
 def GetSumDescriptor(inputs):
-    print(inputs)
     sum_descriptors = inputs
     while len(sum_descriptors) != 1:
         cur_sum_descriptors = []
@@ -179,7 +178,7 @@ def AddFinalNode(config_lines, input, output_dim, ng_affine_options = "", label_
     prev_layer_output = AddSoftmaxNode(config_lines, "Final", prev_layer_output)
     AddOutputNode(config_lines, prev_layer_output, label_delay)
 
-def AddLstmNode(config_lines,
+def AddLstmNode1(config_lines,
                  name, input, cell_dim,
                  recurrent_projection_dim = 0,
                  non_recurrent_projection_dim = 0,
@@ -512,9 +511,6 @@ def AddClstmRateUnit(config_lines,
             'dimension':output_dim
             }
 
-
-
-
 # lowpass filters used to reduce the rate of the signal to specified rates
 filter_cache = {}
 
@@ -529,6 +525,7 @@ def AddCwrnnNode(config_lines,
                  clipping_threshold = 1.0,
                  norm_based_clipping = "false",
                  ng_affine_options = "",
+                 ng_per_element_scale_options = "",
                  ratewise_params = {'T1': {'rate':1, 'dim':128},
                                     'T2': {'rate':1.0/2, 'dim':128},
                                     'T3': {'rate':1.0/4, 'dim':128},
@@ -538,7 +535,8 @@ def AddCwrnnNode(config_lines,
                  subsample = True,
                  diag_init_scaling_factor = 0,
                  input_type = "smooth",
-                 projection_dim = 0 # not used anymore
+                 use_lstm = False,
+                 projection_dim = 0# not used anymore
                  ):
 
     components = config_lines['components']
@@ -614,21 +612,44 @@ def AddCwrnnNode(config_lines,
         for fast_key_index in range(key_index+1, len(keys)):
             fast_key = keys[fast_key_index]
             fastrate_params[fast_key] = ratewise_params[fast_key]
-        [output_descriptor, fastrate_output_descriptors] = AddCwrnnRateUnit(config_lines, '{0}_{1}'.format(name, key),
-                                                                            cw_unit_input_descriptor, params['dim'],
-                                                                            params['rate'],
-                                                                            clipping_threshold = clipping_threshold,
-                                                                            norm_based_clipping = norm_based_clipping,
-                                                                            ng_affine_options = ng_affine_options,
-                                                                            delay = -1 * time_period,
-                                                                            slowrate_descriptors = slow_to_fast_descriptors[key],
-                                                                            fastrate_params = fastrate_params,
-                                                                            nonlinearity = nonlinearity,
-                                                                            subsample = subsample,
-                                                                            diag_init_scaling_factor = diag_init_scaling_factor,
-                                                                            input_type = input_type)
-        for fastrate in fastrate_output_descriptors.keys():
-            slow_to_fast_descriptors[fastrate][key] = fastrate_output_descriptors[fastrate]
+        if use_lstm:
+            [output_descriptor, fastrate_output_descriptors] = AddCwlstmRateUnit(config_lines, '{0}_{1}'.format(name, key),
+                                                                                 cw_unit_input_descriptor, params['cell-dim'],
+                                                                                 params['rate'], params['recurrent-projection'],
+                                                                                 params['non-recurrent-projection'],
+                                                                                 clipping_threshold = clipping_threshold,
+                                                                                 norm_based_clipping = norm_based_clipping,
+                                                                                 ng_per_element_scale_options = ng_per_element_scale_options,
+                                                                                 ng_affine_options = ng_affine_options,
+                                                                                 lstm_delay = -1 * time_period,
+                                                                                 slowrate_descriptors = slow_to_fast_descriptors[key],
+                                                                                 fastrate_params = fastrate_params,
+                                                                                 subsample = subsample,
+                                                                                 input_type = input_type)
+            for fastrate in fastrate_output_descriptors.keys():
+                for dest_name in fastrate_output_descriptors[fastrate].keys():
+                    try:
+                        slow_to_fast_descriptors[fastrate][dest_name][key] = fastrate_output_descriptors[fastrate][dest_name]
+                    except KeyError:
+                        slow_to_fast_descriptors[fastrate][dest_name] = {}
+                        slow_to_fast_descriptors[fastrate][dest_name][key] = fastrate_output_descriptors[fastrate][dest_name]
+
+        else:
+            [output_descriptor, fastrate_output_descriptors] = AddCwrnnRateUnit(config_lines, '{0}_{1}'.format(name, key),
+                                                                                cw_unit_input_descriptor, params['dim'],
+                                                                                params['rate'],
+                                                                                clipping_threshold = clipping_threshold,
+                                                                                norm_based_clipping = norm_based_clipping,
+                                                                                ng_affine_options = ng_affine_options,
+                                                                                delay = -1 * time_period,
+                                                                                slowrate_descriptors = slow_to_fast_descriptors[key],
+                                                                                fastrate_params = fastrate_params,
+                                                                                nonlinearity = nonlinearity,
+                                                                                subsample = subsample,
+                                                                                diag_init_scaling_factor = diag_init_scaling_factor,
+                                                                                input_type = input_type)
+            for fastrate in fastrate_output_descriptors.keys():
+                slow_to_fast_descriptors[fastrate][key] = fastrate_output_descriptors[fastrate]
     return [output_descriptor, max_num_lpfilter_taps, largest_time_period]
 
 def AddCwrnnRateUnit(config_lines,
@@ -717,14 +738,210 @@ def AddCwrnnRateUnit(config_lines,
                 fastrate_descriptor = 'Round({0}, {1})'.format(output_name, unit_time_period)
             else:
                 fastrate_descriptor = output_name
-            fastrate_output_descriptors[key] = {    'descriptor': fastrate_descriptor,
-                                                    'dimension' : params['dim']
-                                                }
+            fastrate_output_descriptors[key] = {'descriptor': fastrate_descriptor,
+                                                'dimension' : params['dim']}
 
     output_descriptor = "{0}_{1}".format(name, recurrent_connection)
     return [{'descriptor': output_descriptor, 'dimension':output_dim}, fastrate_output_descriptors]
 
-def AddLstmNode1(config_lines,
+def AddCwlstmRateUnit(config_lines,
+                    name, input, cell_dim,
+                    unit_rate,
+                    recurrent_projection_dim = 0,
+                    non_recurrent_projection_dim = 0,
+                    clipping_threshold = 1.0,
+                    norm_based_clipping = "false",
+                    ng_affine_options = "",
+                    ng_per_element_scale_options = "",
+                    lstm_delay = -1,
+                    slowrate_descriptors = {},
+                    fastrate_params = {},
+                    subsample = True,
+                    input_type = "smooth"):
+
+    assert(recurrent_projection_dim >= 0 and non_recurrent_projection_dim >= 0)
+    if not subsample:
+        lstm_delay = -1
+    recurrent_ng_affine_options = ng_affine_options
+    nonrecurrent_ng_affine_options = ng_affine_options
+
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+    input_descriptor = input['descriptor']
+    input_dim = input['dimension']
+    name = name.strip()
+
+    if (recurrent_projection_dim == 0):
+        add_recurrent_projection = False
+        recurrent_projection_dim = cell_dim
+        recurrent_connection = "m_t"
+    else:
+        add_recurrent_projection = True
+        recurrent_connection = "r_t"
+    if (non_recurrent_projection_dim == 0):
+        add_non_recurrent_projection = False
+    else:
+        add_non_recurrent_projection = True
+
+    if len(slowrate_descriptors.keys()) > 0:
+        #ssd stands for slowrate-descriptors
+        input_gate_sd = map(lambda x: x['descriptor'], slowrate_descriptors['input-gate'].values())
+        output_gate_sd = map(lambda x: x['descriptor'], slowrate_descriptors['output-gate'].values())
+        forget_gate_sd = map(lambda x: x['descriptor'], slowrate_descriptors['forget-gate'].values())
+        input_sd = map(lambda x: x['descriptor'], slowrate_descriptors['forget-gate'].values())
+    else:
+        input_gate_sd = ['']
+        output_gate_sd = ['']
+        forget_gate_sd = ['']
+        input_sd = ['']
+
+    unit_time_period = int(1.0 / unit_rate)
+
+    if input_type in set(["stack", "sum"]):
+        splice_indexes = range(-1*(unit_time_period-1), 1)
+
+        list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in splice_indexes]
+        if input_type == "stack":
+            input_descriptor = 'Append({0})'.format(' , '.join(list))
+            input_dim = len(splice_indexes) * input_dim
+        elif input_type == "sum":
+            input_descriptor = GetSumDescriptor(list)[0]
+    else:
+        input_descriptor = input['descriptor']
+
+    # Parameter Definitions W*(* replaced by - to have valid names)
+    components.append("# Current rate components : W_ifoc-r")
+    total_fastrate_unit_dim = 4 * sum(map(lambda x: x['cell-dim'], fastrate_params.values())) # 4 times as we need inputs for 3 gates and the input
+    components.append("component name={0}_W_ifoc-allrates-r type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, recurrent_projection_dim, (4 * cell_dim) + total_fastrate_unit_dim, recurrent_ng_affine_options))
+    components.append("component name={0}_W_ifoc-x type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, input_dim, (4 * cell_dim), nonrecurrent_ng_affine_options))
+
+    components.append("# note : the cell outputs pass through a diagonal matrix")
+    components.append("component name={0}_w_ic type=NaturalGradientPerElementScaleComponent  dim={1} {2}".format(name, cell_dim, ng_per_element_scale_options))
+
+    components.append("# note : the cell outputs pass through a diagonal matrix")
+    components.append("component name={0}_w_fc type=NaturalGradientPerElementScaleComponent  dim={1} {2}".format(name, cell_dim, ng_per_element_scale_options))
+
+    components.append("# note : the cell outputs pass through a diagonal matrix")
+    components.append("component name={0}_w_oc type=NaturalGradientPerElementScaleComponent  dim={1} {2}".format(name, cell_dim, ng_per_element_scale_options))
+
+    components.append("# Defining the non-linearities")
+    components.append("component name={0}_i type=SigmoidComponent dim={1}".format(name, cell_dim))
+    components.append("component name={0}_f type=SigmoidComponent dim={1}".format(name, cell_dim))
+    components.append("component name={0}_o type=SigmoidComponent dim={1}".format(name, cell_dim))
+    components.append("component name={0}_g type=TanhComponent dim={1}".format(name, cell_dim))
+    components.append("component name={0}_h type=TanhComponent dim={1}".format(name, cell_dim))
+
+    components.append("# Defining the cell computations")
+    components.append("component name={0}_c1 type=ElementwiseProductComponent input-dim={1} output-dim={2}".format(name, 2 * cell_dim, cell_dim))
+    components.append("component name={0}_c2 type=ElementwiseProductComponent input-dim={1} output-dim={2}".format(name, 2 * cell_dim, cell_dim))
+    components.append("component name={0}_m type=ElementwiseProductComponent input-dim={1} output-dim={2}".format(name, 2 * cell_dim, cell_dim))
+    components.append("component name={0}_c type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} ".format(name, cell_dim, clipping_threshold, norm_based_clipping))
+
+    # c1_t and c2_t defined below
+    component_nodes.append("component-node name={0}_c_t component={0}_c input=Sum({0}_c1_t, {0}_c2_t)".format(name))
+    c_tminus1_descriptor = "IfDefined(Offset({0}_c_t, {1}))".format(name, lstm_delay)
+
+    component_nodes.append("component-node name={0}_tocell_allrates_r component={0}_W_ifoc-allrates-r input=IfDefined(Offset({0}_{1}, {2}))".format(name, recurrent_connection, lstm_delay))
+    component_nodes.append("component-node name={0}_tocell_x component={0}_W_ifoc-x input={1}".format(name, input_descriptor))
+
+    tocell_offset = 0
+    component_nodes.append("# i_t")
+    component_nodes.append("dim-range-node name={0}_i1_r input-node={0}_tocell_allrates_r dim-offset={1} dim={2}".format(name, tocell_offset, cell_dim))
+    component_nodes.append("dim-range-node name={0}_i1_x input-node={0}_tocell_x dim-offset={1} dim={2}".format(name, tocell_offset, cell_dim))
+    tocell_offset += cell_dim
+    component_nodes.append("component-node name={0}_i2 component={0}_w_ic  input={1}".format(name, c_tminus1_descriptor))
+    input_gate_ssd = GetSumDescriptor(input_gate_sd + ['{0}_i1_r'.format(name), '{0}_i1_x'.format(name), '{0}_i2'.format(name)])[0]
+    component_nodes.append("component-node name={0}_i_t component={0}_i input={1}".format(name, input_gate_ssd))
+
+    component_nodes.append("# f_t")
+    component_nodes.append("dim-range-node name={0}_f1_r input-node={0}_tocell_allrates_r dim-offset={1} dim={2}".format(name, tocell_offset, cell_dim))
+    component_nodes.append("dim-range-node name={0}_f1_x input-node={0}_tocell_x dim-offset={1} dim={2}".format(name, tocell_offset, cell_dim))
+    tocell_offset += cell_dim
+    component_nodes.append("component-node name={0}_f2 component={0}_w_fc  input={1}".format(name, c_tminus1_descriptor))
+    forget_gate_ssd = GetSumDescriptor(forget_gate_sd + ['{0}_f1_r'.format(name), '{0}_f1_x'.format(name), '{0}_f2'.format(name)])[0]
+    component_nodes.append("component-node name={0}_f_t component={0}_f input={1}".format(name, forget_gate_ssd))
+
+    component_nodes.append("# o_t")
+    component_nodes.append("dim-range-node name={0}_o1_r input-node={0}_tocell_allrates_r dim-offset={1} dim={2}".format(name, tocell_offset, cell_dim))
+    component_nodes.append("dim-range-node name={0}_o1_x input-node={0}_tocell_x dim-offset={1} dim={2}".format(name, tocell_offset, cell_dim))
+    tocell_offset += cell_dim
+    component_nodes.append("component-node name={0}_o2 component={0}_w_oc input={0}_c_t".format(name))
+    output_gate_ssd = GetSumDescriptor(output_gate_sd + ['{0}_o1_r'.format(name), '{0}_o1_x'.format(name), '{0}_o2'.format(name)])[0]
+    component_nodes.append("component-node name={0}_o_t component={0}_o input={1}".format(name, output_gate_ssd))
+
+    component_nodes.append("# h_t")
+    component_nodes.append("component-node name={0}_h_t component={0}_h input={0}_c_t".format(name))
+
+    component_nodes.append("# g_t")
+    component_nodes.append("dim-range-node name={0}_g1_r input-node={0}_tocell_allrates_r dim-offset={1} dim={2}".format(name, tocell_offset, cell_dim))
+    component_nodes.append("dim-range-node name={0}_g1_x input-node={0}_tocell_x dim-offset={1} dim={2}".format(name, tocell_offset, cell_dim))
+    tocell_offset += cell_dim
+    input_ssd = GetSumDescriptor(input_sd + ['{0}_g1_r'.format(name), '{0}_g1_x'.format(name)])[0]
+    component_nodes.append("component-node name={0}_g_t component={0}_g input={1}".format(name, input_ssd))
+
+    component_nodes.append("# parts of c_t")
+    component_nodes.append("component-node name={0}_c1_t component={0}_c1  input=Append({0}_f_t, {1})".format(name, c_tminus1_descriptor))
+    component_nodes.append("component-node name={0}_c2_t component={0}_c2 input=Append({0}_i_t, {0}_g_t)".format(name))
+
+    component_nodes.append("# m_t")
+    component_nodes.append("component-node name={0}_m_t component={0}_m input=Append({0}_o_t, {0}_h_t)".format(name))
+
+    # add the recurrent connections
+    if (add_recurrent_projection and add_non_recurrent_projection):
+        components.append("# projection matrices : Wrm and Wpm")
+        components.append("component name={0}_W-m type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, cell_dim, recurrent_projection_dim + non_recurrent_projection_dim, ng_affine_options))
+        components.append("component name={0}_r type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} ".format(name, recurrent_projection_dim, clipping_threshold, norm_based_clipping))
+        component_nodes.append("# r_t and p_t")
+        component_nodes.append("component-node name={0}_rp_t component={0}_W-m input={0}_m_t".format(name))
+        component_nodes.append("dim-range-node name={0}_r_t_preclip input-node={0}_rp_t dim-offset=0 dim={1}".format(name, recurrent_projection_dim))
+        component_nodes.append("component-node name={0}_r_t component={0}_r input={0}_r_t_preclip".format(name))
+        output_descriptor = '{0}_rp_t'.format(name)
+        output_dim = recurrent_projection_dim + non_recurrent_projection_dim
+
+    elif add_recurrent_projection:
+        components.append("# projection matrices : Wrm")
+        components.append("component name={0}_Wrm type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, cell_dim, recurrent_projection_dim, ng_affine_options))
+        components.append("component name={0}_r type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} ".format(name, recurrent_projection_dim, clipping_threshold, norm_based_clipping))
+        component_nodes.append("# r_t")
+        component_nodes.append("component-node name={0}_r_t_preclip component={0}_Wrm input={0}_m_t".format(name))
+        component_nodes.append("component-node name={0}_r_t component={0}_r input={0}_r_t_preclip".format(name))
+        output_descriptor = '{0}_r_t'.format(name)
+        output_dim = recurrent_projection_dim
+
+    else:
+        components.append("component name={0}_r type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} ".format(name, cell_dim, clipping_threshold, norm_based_clipping))
+        component_nodes.append("component-node name={0}_r_t component={0}_r input={0}_m_t".format(name))
+        output_descriptor = '{0}_r_t'.format(name)
+        output_dim = cell_dim
+
+
+    # now seperate the remaining parts of {0}_tocell_allrates_r
+    fastrate_output_descriptors = {}
+    input_node = '{0}_tocell_allrates_r'.format(name)
+    fast_dest_name = ['input-gate', 'output-gate', 'forget-gate', 'input']
+    fast_dest_shortname = ['i', 'o', 'f', 'g']
+    for key in fastrate_params.keys():
+        params = fastrate_params[key]
+        fastrate_time_period = int(1.0/params['rate'])
+        cur_cell_dim = params['cell-dim']
+        cur_descriptors = {}
+        for i in range(len(fast_dest_name)):
+            dest_name = fast_dest_name[i]
+            shortname = fast_dest_shortname[i]
+            output_name = '{0}_{1}_fast-tmod{2}_t'.format(name, shortname, fastrate_time_period)
+            component_nodes.append("dim-range-node name={0} input-node={1} dim-offset={2} dim={3}".format(output_name, input_node, tocell_offset, cur_cell_dim))
+            tocell_offset += cur_cell_dim
+            if subsample:
+                cur_descriptor = 'Round({0}, {1})'.format(output_name, unit_time_period) 
+            else:
+                cur_descriptor = output_name 
+            cur_descriptors[dest_name] = {'descriptor' : cur_descriptor,
+                                          'dimension'  : cur_cell_dim}
+        fastrate_output_descriptors[key] = cur_descriptors
+    return [{'descriptor': output_descriptor, 'dimension':output_dim}, fastrate_output_descriptors]
+
+
+def AddLstmNode(config_lines,
                  name, input, cell_dim,
                  recurrent_projection_dim = 0,
                  non_recurrent_projection_dim = 0,
@@ -1036,7 +1253,9 @@ def AddCwrnnNode1(config_lines,
 
 
     # for now we will append the slow and fast descriptors
-    # this means we will not take advantage of the slower rate units
+    # this means we will not take advantage of the slower rate unitos
+
+
     # trying to take advantage of the slower rate units in other nodes
     # is not easy to implement without effecting the modularity of the code
     if projection_dim > 0:
@@ -1076,7 +1295,10 @@ def AddCwrnnRateUnit1(config_lines,
                  name, input, output_dim,
                  unit_rate,
                  clipping_threshold = 1.0,
-                 norm_based_clipping = "false",
+                 norm_based_clipping 
+                 
+                 
+                 = "false",
                  ng_affine_options = "",
                  delay = -1,
                  slowrate_descriptors = {},

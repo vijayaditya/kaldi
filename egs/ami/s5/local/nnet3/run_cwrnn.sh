@@ -41,6 +41,7 @@ diag_init_scaling_factor=0
 ng_affine_options=
 projection_dim=0
 subsample=true
+use_lstm=false
 
 # training options
 num_epochs=10
@@ -125,6 +126,7 @@ if [ $stage -le 8 ]; then
     --label-delay $label_delay \
     --projection-dim $projection_dim \
     --subsample "$subsample" \
+    --use-lstm "$use_lstm" \
     --num-epochs $num_epochs --num-jobs-initial $num_jobs_initial --num-jobs-final $num_jobs_final \
     --num-chunk-per-minibatch $num_chunk_per_minibatch \
     --samples-per-iter $samples_per_iter \

@@ -56,6 +56,7 @@ input_type="smooth"
 nonlinearity="SigmoidComponent"
 diag_init_scaling_factor=0
 num_cwrnn_layers=3
+use_lstm=false
 subsample=true
 hidden_dim=1024  # the dimension of the fully connected hidden layer outputs
 norm_based_clipping=true  # if true norm_based_clipping is used.
@@ -265,6 +266,7 @@ if [ $stage -le -5 ]; then
     --subsample "$subsample" \
     --input-type "$input_type" \
     --diag-init-scaling-factor $diag_init_scaling_factor \
+    --use-lstm "$use_lstm" \
     --norm-based-clipping $norm_based_clipping \
     --clipping-threshold $clipping_threshold \
     --num-targets $num_leaves \
@@ -493,7 +495,7 @@ while [ $x -lt $num_iters ]; do
   fi
 
   if [ $x -ge 0 ] && [ $stage -le $x ]; then
-    if [ "$nonlinearity" == "RectifiedLinearComponent" ] || [ "$nonlinearity" == "RectifiedLinearComponent+NormalizeComponent" ]; then
+    if [ "$nonlinearity" == "RectifiedLinearComponent+NormalizeComponent" ]; then
       # we might want to do something like nnet-am-fix here.
       this_shrink=1.0
     else
