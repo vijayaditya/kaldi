@@ -108,7 +108,7 @@ def AddAffineNode(config_lines, name, input, output_dim, ng_affine_options = "")
     return {'descriptor':  '{0}_affine'.format(name),
             'dimension': output_dim}
 
-def AddAffRelNormNode(config_lines, name, input, output_dim, ng_affine_options = ""):
+def AddAffRelNormNode(config_lines, name, input, output_dim, ng_affine_options = " bias-stddev=0 "):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
 
@@ -173,8 +173,15 @@ def AddOutputNode(config_lines, input, label_delay=None):
     else:
         component_nodes.append('output-node name=output input=Offset({0},{1})'.format(input['descriptor'], label_delay))
 
-def AddFinalNode(config_lines, input, output_dim, ng_affine_options = "", label_delay=None):
+def AddFinalNode(config_lines, input, output_dim, ng_affine_options = " param-stddev=0 bias-stddev=0 ", label_delay=None, use_presoftmax_prior_scale = False, prior_scale_file = None):
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+    
     prev_layer_output = AddAffineNode(config_lines, "Final", input, output_dim, ng_affine_options)
+    if use_presoftmax_prior_scale :
+        components.append('component name=Final-fixed-scale type=FixedScaleComponent scales={0}'.format(prior_scale_file))
+        component_nodes.append('component-node name=Final-fixed-scale component=Final-fixed-scale input={0}'.format(prev_layer_output['descriptor']))
+        prev_layer_output['descriptor'] = "Final-fixed-scale"
     prev_layer_output = AddSoftmaxNode(config_lines, "Final", prev_layer_output)
     AddOutputNode(config_lines, prev_layer_output, label_delay)
 

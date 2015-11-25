@@ -16,6 +16,9 @@ use_sat_alignments=true
 affix=
 speed_perturb=true
 common_egs_dir=
+splice_indexes="-2,-1,0,1,2 -1,2 -3,3 -7,2 -3,3 0 0"
+subset_dim=0
+remove_egs=true
 
 . cmd.sh
 . ./path.sh
@@ -59,32 +62,22 @@ if [ $stage -le 8 ]; then
      /export/b0{3,4,5,6}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
   fi
 
-  steps/nnet3/train_tdnn.sh --stage $train_stage \
+  steps/nnet3/tdnn/train.sh --stage $train_stage \
     --num-epochs 3 --num-jobs-initial 2 --num-jobs-final 12 \
-    --splice-indexes "-2,-1,0,1,2 -1,2 -3,3 -7,2 -3,3 0 0" \
+    --splice-indexes "$splice_indexes" \
+    --subset-dim "$subset_dim" \
     --feat-type raw \
     --online-ivector-dir exp/$mic/nnet3/ivectors_${train_set}_hires \
     --cmvn-opts "--norm-means=false --norm-vars=false" \
-    --io-opts "--max-jobs-run 12" \
     --egs-dir "$common_egs_dir" \
     --initial-effective-lrate 0.0015 --final-effective-lrate 0.00015 \
     --cmd "$decode_cmd" \
     --relu-dim 850 \
+    --remove-egs "$remove_egs" \
     data/$mic/${train_set}_hires data/lang $ali_dir $dir  || exit 1;
 fi
 
 if [ $stage -le 9 ]; then
-  rm -f exp/$mic/nnet3/.error 2>/dev/null
-  for data in dev eval; do
-    steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 8 \
-      data/$mic/${data}_hires exp/$mic/nnet3/extractor exp/$mic/nnet3/ivectors_${data} || touch exp/$mic/nnet3/.error &
-  done
-  wait
-  [ -f exp/$mic/nnet3/.error ] && echo "$0: error extracting iVectors." && exit 1;
-fi
-
-
-if [ $stage -le 10 ]; then
   # this version of the decoding treats each utterance separately
   # without carrying forward speaker information.
   for decode_set in dev eval; do
