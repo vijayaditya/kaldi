@@ -183,7 +183,8 @@ void GetComputationRequest(const Nnet &nnet,
     IoSpecification &io_spec = dest.back();
     io_spec.name = name;
     io_spec.indexes = io.indexes;
-    io_spec.has_deriv = nnet.IsOutputNode(node_index) && need_model_derivative;
+    io_spec.has_deriv = need_model_derivative;
+    // io_spec.has_deriv = nnet.IsOutputNode(node_index) && need_model_derivative;
   }
   // check to see if something went wrong.
   if (request->inputs.empty())

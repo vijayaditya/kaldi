@@ -476,7 +476,7 @@ int32 NnetComputer::GetMatrixIndex(
   int32 location;
   if (is_deriv) {
     location = locations.second;
-    if (locations.second <= 0) // No deriv expected.
+    if (locations.second < 0) // No deriv expected.
       KALDI_ERR << "Not expecting derivative information for node named '"
                 << node_name << "' (not in computation request)";
   } else {

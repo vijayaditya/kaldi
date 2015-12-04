@@ -84,6 +84,147 @@ void NnetTrainer::Train(const NnetExample &eg) {
   }
 }
 
+void NnetPerturbedTrainer::Train(const NnetExample &eg) {
+  bool need_model_derivative = true;
+  NnetExample eg_perturbed(eg);
+  if (RandInt(0, 100) < config_.perturb_proportion * 100) {
+    KALDI_LOG << "training with epsilon with " << config_.epsilon;
+    ComputationRequest request;
+    GetComputationRequest(*nnet_, eg, need_model_derivative,
+                          config_.store_component_stats,
+                          &request);
+    const NnetComputation *computation = compiler_.Compile(request);
+    Nnet nnet_temp(*nnet_);
+    NnetComputer computer(config_.compute_config, *computation,
+                          *nnet_,
+                          &nnet_temp);
+    // give the inputs to the computer object.
+    computer.AcceptInputs(*nnet_, eg.io);
+    computer.Forward();
+  
+    this->ProcessOutputs(eg, &computer);
+    computer.Backward();
+ 
+    int32 minibatch_size = 0;
+
+    for (size_t i = 0; i < eg_perturbed.io.size(); i++) {
+      NnetIo io = eg_perturbed.io[i];
+      if (io.name == "ivector") {
+        minibatch_size = io.features.NumRows();
+      }
+    }
+    if (minibatch_size == 0) {
+      KALDI_ERR << "Currently this experimental recipe only supports training with ivectors~~~";
+    }
+    
+    CuVector<BaseFloat> deriv_norm(minibatch_size);
+    std::vector<CuMatrix<BaseFloat> > input_derivs;
+    for (size_t i = 0; i < eg_perturbed.io.size(); i++) {
+      NnetIo io = eg_perturbed.io[i];
+      int32 node_index = nnet_->GetNodeIndex(io.name);
+      if (node_index == -1)
+        KALDI_ERR << "No node named '" << io.name << "' in nnet.";
+      // KALDI_LOG << "num rows: " << io.features.NumRows() << " num cols: " << io.features.NumCols();
+      if (nnet_->IsInputNode(node_index)) {
+        CuMatrix<BaseFloat> input_deriv(io.features.NumRows(),
+                                     io.features.NumCols(),
+                                     kUndefined);
+        input_deriv = computer.GetInputDeriv(io.name);
+        // KALDI_LOG << io.name << " input_deriv norm is " << input_deriv.FrobeniusNorm();
+        // KALDI_LOG << io.name << " input_deriv is " << input_deriv.Range(0,10,0,10);
+        input_derivs.push_back(input_deriv);
+
+        if (io.name == "ivector") {
+          for (int32 i = 0; i < minibatch_size; i++) {
+            BaseFloat tmp = input_deriv.Row(i).Norm(2.0);
+            deriv_norm(i) += tmp * tmp;
+          }
+        } else {
+          int32 block_size = io.features.NumRows() / minibatch_size;
+          for (int32 i = 0; i < minibatch_size; i++) {
+            BaseFloat tmp = input_deriv.RowRange(i * block_size, block_size).FrobeniusNorm();
+            deriv_norm(i) += tmp * tmp;
+          }
+        }
+      }
+    }
+    deriv_norm.ApplyPow(0.5);
+    if (deriv_norm.Norm(2.0) > 0) {
+      for (size_t i = 0; i < eg_perturbed.io.size(); i++) {
+        NnetIo io = eg_perturbed.io[i];
+        int32 node_index = nnet_->GetNodeIndex(io.name);
+        if (nnet_->IsInputNode(node_index)) {
+          if (io.name == "ivector") {
+            input_derivs[i].DivRowsVec(deriv_norm);
+          } else {
+            int32 block_size = io.features.NumRows() / minibatch_size;
+            for (int32 j = 0; j < minibatch_size; j++) {
+              input_derivs[i].RowRange(j * block_size, block_size).Scale(1 / deriv_norm(j));
+            }
+          }
+          CuMatrix<BaseFloat> cu_input(io.features.NumRows(),
+                                       io.features.NumCols(),
+                                       kUndefined);
+          cu_input.CopyFromGeneralMat(io.features);
+          cu_input.AddMat(-config_.epsilon, input_derivs[i]);  
+          Matrix<BaseFloat> input(cu_input);
+          io.features = input;
+          eg_perturbed.io[i] = io;
+         // CuMatrix<BaseFloat> diff(io.features.NumRows(), io.features.NumCols(), kUndefined);
+         // diff.CopyFromGeneralMat(io.features);
+         // io2.features.AddToMat(-1.0, &diff, kNoTrans);
+         // KALDI_LOG << diff.Range(0,10,0,10);
+        }
+      }
+    }
+  }
+ // for (size_t i = 0; i < 2; i++) {
+ //   NnetIo io = eg_perturbed.io[i];
+ //   CuMatrix<BaseFloat> fe(io.features.NumRows(), io.features.NumCols(), kUndefined);
+ //   fe.CopyFromGeneralMat(io.features);
+ //   KALDI_LOG << "feature norm " << fe.FrobeniusNorm();
+ // }
+  {
+    ComputationRequest request;
+    GetComputationRequest(*nnet_, eg_perturbed, need_model_derivative,
+                          config_.store_component_stats,
+                          &request);
+  
+    const NnetComputation *computation = compiler_.Compile(request);
+  
+    NnetComputer computer(config_.compute_config, *computation,
+                          *nnet_,
+                          (delta_nnet_ == NULL ? nnet_ : delta_nnet_));
+    // give the inputs to the computer object.
+    computer.AcceptInputs(*nnet_, eg_perturbed.io);
+    computer.Forward();
+  
+    this->ProcessOutputs2(eg_perturbed, &computer);
+    computer.Backward();
+    
+    if (delta_nnet_ != NULL) {
+      BaseFloat scale = (1.0 - config_.momentum);
+      if (config_.max_param_change != 0.0) {
+        BaseFloat param_delta =
+            std::sqrt(DotProduct(*delta_nnet_, *delta_nnet_)) * scale;
+        if (param_delta > config_.max_param_change) {
+          if (param_delta - param_delta != 0.0) {
+            KALDI_WARN << "Infinite parameter change, will not apply.";
+            SetZero(false, delta_nnet_);
+          } else {
+            scale *= config_.max_param_change / param_delta;
+            KALDI_LOG << "Parameter change too big: " << param_delta << " > "
+                      << "--max-param-change=" << config_.max_param_change
+                      << ", scaling by " << config_.max_param_change / param_delta;
+          }
+        }
+      }
+      AddNnet(*delta_nnet_, scale, nnet_);
+      ScaleNnet(config_.momentum, delta_nnet_);
+    }
+  }
+}
+
 void NnetTrainer::ProcessOutputs(const NnetExample &eg,
                                  NnetComputer *computer) {
   std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
@@ -100,6 +241,28 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
                                supply_deriv, computer,
                                &tot_weight, &tot_objf);
       objf_info_[io.name].UpdateStats(io.name, config_.print_interval,
+                                      num_minibatches_processed_++,
+                                      tot_weight, tot_objf);
+    }
+  }
+}
+
+void NnetTrainer::ProcessOutputs2(const NnetExample &eg,
+                                 NnetComputer *computer) {
+  std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
+      end = eg.io.end();
+  for (; iter != end; ++iter) {
+    const NnetIo &io = *iter;
+    int32 node_index = nnet_->GetNodeIndex(io.name);
+    KALDI_ASSERT(node_index >= 0);
+    if (nnet_->IsOutputNode(node_index)) {
+      ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type;
+      BaseFloat tot_weight, tot_objf;
+      bool supply_deriv = true;
+      ComputeObjectiveFunction(io.features, obj_type, io.name,
+                               supply_deriv, computer,
+                               &tot_weight, &tot_objf);
+      objf_info2_[io.name].UpdateStats(io.name, config_.print_interval,
                                       num_minibatches_processed_++,
                                       tot_weight, tot_objf);
     }

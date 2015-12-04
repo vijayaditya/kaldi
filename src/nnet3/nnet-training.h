@@ -35,6 +35,8 @@ struct NnetTrainerOptions {
   int32 print_interval;
   bool debug_computation;
   BaseFloat momentum;
+  BaseFloat epsilon;
+  BaseFloat perturb_proportion;
   BaseFloat max_param_change;
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
@@ -44,6 +46,8 @@ struct NnetTrainerOptions {
       print_interval(100),
       debug_computation(false),
       momentum(0.0),
+      epsilon(0.1),
+      perturb_proportion(1.0),
       max_param_change(2.0) { }
   void Register(OptionsItf *opts) {
     opts->Register("store-component-stats", &store_component_stats,
@@ -64,6 +68,8 @@ struct NnetTrainerOptions {
                    "so that the 'effective' learning rate is the same as "
                    "before (because momentum would normally increase the "
                    "effective learning rate by 1/(1-momentum))");
+    opts->Register("epsilon", &epsilon, "regularization constant for perturbed training");
+    opts->Register("perturb-proportion", &perturb_proportion, "the proportion of examples on which we do perturbed training");
 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
@@ -133,11 +139,16 @@ class NnetTrainer {
 
   // Prints out the final stats, and return true if there was a nonzero count.
   bool PrintTotalStats() const;
+  bool PrintTotalStats2() const;
+  bool PrintTotalStats3() const;
 
   ~NnetTrainer();
- private:
+ protected:
   void ProcessOutputs(const NnetExample &eg,
                       NnetComputer *computer);
+  void ProcessOutputs2(const NnetExample &eg,
+                      NnetComputer *computer);
+
 
   const NnetTrainerOptions config_;
   Nnet *nnet_;
@@ -153,6 +164,7 @@ class NnetTrainer {
   int32 num_minibatches_processed_;
 
   unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info_;
+  unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info2_;
 };
 
 /**
@@ -197,6 +209,11 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               BaseFloat *tot_weight,
                               BaseFloat *tot_objf);
 
+class NnetPerturbedTrainer : public NnetTrainer {
+ public:
+  NnetPerturbedTrainer(const NnetTrainerOptions &config, Nnet *nnet) : NnetTrainer(config, nnet) {}
+  void Train(const NnetExample &eg);
+};
 
 
 } // namespace nnet3
