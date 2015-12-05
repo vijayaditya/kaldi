@@ -190,34 +190,33 @@ if __name__ == "__main__":
 
     extra_left_context = 0
     for i in range(args.num_cwrnn_layers):
+        warnings.warn("CWRNN units do not use the ng_affine_options specified")
         [prev_layer_output, num_lpfilter_taps, largest_time_period] = nodes.AddCwrnnNode(config_lines, "Cwrnn{0}".format(i+1),
-                                                                    prev_layer_output, '{0}/cwrnn_layer{1}_lp_filts.txt'.format(args.config_dir, i),
-                                                                    args.num_lpfilter_taps,
-                                                                    clipping_threshold = args.clipping_threshold,
-                                                                    norm_based_clipping = args.norm_based_clipping,
-                                                                    ng_affine_options = args.ng_affine_options,
-                                                                    ratewise_params = ratewise_params,
-                                                                    nonlinearity = args.nonlinearity,
-                                                                    input_type = input_type,
-                                                                    subsample = subsample,
-                                                                    diag_init_scaling_factor = args.diag_init_scaling_factor,
-                                                                    use_lstm = use_lstm,
-                                                                    projection_dim = args.projection_dim)
+                                                                                         prev_layer_output, '{0}/cwrnn_layer{1}_lp_filts.txt'.format(args.config_dir, i),
+                                                                                         args.num_lpfilter_taps,
+                                                                                         clipping_threshold = args.clipping_threshold,
+                                                                                         norm_based_clipping = args.norm_based_clipping,
+                                                                                         ratewise_params = ratewise_params,
+                                                                                         nonlinearity = args.nonlinearity,
+                                                                                         input_type = input_type,
+                                                                                         subsample = subsample,
+                                                                                         diag_init_scaling_factor = args.diag_init_scaling_factor,
+                                                                                         use_lstm = use_lstm,
+                                                                                         projection_dim = args.projection_dim)
         if input_type in set(["stack", "sum"]):
             extra_left_context += largest_time_period
         # make the intermediate config file for layerwise discriminative
         # training
-        nodes.AddFinalNode(config_lines, prev_layer_output, args.num_targets, args.ng_affine_options, args.label_delay)
+        nodes.AddFinalNode(config_lines, prev_layer_output, args.num_targets, label_delay = args.label_delay)
         config_files['{0}/layer{1}.config'.format(args.config_dir, i+1)] = config_lines
         config_lines = {'components':[], 'component-nodes':[]}
 
     for i in range(args.num_cwrnn_layers, num_hidden_layers):
         prev_layer_output = nodes.AddAffRelNormNode(config_lines, "L{0}".format(i+1),
-                                               prev_layer_output, args.hidden_dim,
-                                               args.ng_affine_options)
+                                               prev_layer_output, args.hidden_dim)
         # make the intermediate config file for layerwise discriminative
         # training
-        nodes.AddFinalNode(config_lines, prev_layer_output, args.num_targets, args.ng_affine_options, args.label_delay)
+        nodes.AddFinalNode(config_lines, prev_layer_output, args.num_targets, label_delay = args.label_delay)
         config_files['{0}/layer{1}.config'.format(args.config_dir, i+1)] = config_lines
         config_lines = {'components':[], 'component-nodes':[]}
 
