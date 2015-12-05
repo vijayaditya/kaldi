@@ -7,14 +7,19 @@ import sys
 import warnings
 import copy
 import imp
+import ast
 
 nodes = imp.load_source('', 'steps/nnet3/nodes.py')
+
+def CheckRatewiseParams(ratewise_params):
+    #TODO : write this
+    return True
 
 def PrintConfig(file_name, config_lines):
     f = open(file_name, 'w')
     f.write("\n".join(config_lines['components'])+"\n")
     f.write("\n#Component nodes\n")
-    f.write("\n".join(config_lines['component-nodes'])+"\n")
+    f.write("\n".join(config_lines['component-nodes']))
     f.close()
 
 def ParseSpliceString(splice_indexes, label_delay=None):
@@ -23,12 +28,11 @@ def ParseSpliceString(splice_indexes, label_delay=None):
     if len(split1) < 1:
         splice_indexes = "0"
 
-    left_context=0
-    right_context=0
+    left_context = 0
+    right_context = 0
     if label_delay is not None:
         left_context = -label_delay
         right_context = label_delay
-
     splice_array = []
     try:
         for i in range(len(split1)):
@@ -59,29 +63,10 @@ def ParseSpliceString(splice_indexes, label_delay=None):
             'num_hidden_layers':len(splice_array)
             }
 
-def ParseLstmDelayString(lstm_delay):
-    ## Work out lstm_delay e.g. "-1 [-1,1] -2" -> list([ [-1], [-1, 1], [-2] ])
-    split1 = lstm_delay.split(" ");
-    lstm_delay_array = []
-    try:
-        for i in range(len(split1)):
-            indexes = map(lambda x: int(x), split1[i].strip().lstrip('[').rstrip(']').strip().split(","))
-            if len(indexes) < 1:
-                raise ValueError("invalid --lstm-delay argument, too-short element: "
-                                + lstm_delay)
-	    elif len(indexes) == 2 and indexes[0] * indexes[1] >= 0:
-                raise ValueError('Warning: ' + str(indexes) + ' is not a standard BLSTM mode. There should be a negative delay for the forward, and a postive delay for the backward.')
-            lstm_delay_array.append(indexes)
-    except ValueError as e:
-        raise ValueError("invalid --lstm-delay argument " + lstm_delay + str(e))
-
-    return lstm_delay_array
-
-   
 if __name__ == "__main__":
     # we add compulsary arguments as named arguments for readability
     parser = argparse.ArgumentParser(description="Writes config files and variables "
-                                                 "for LSTMs creation and training",
+                                                 "for CLSTMs creation and training",
                                      epilog="See steps/nnet3/lstm/train.sh for example.")
     # General neural network options
     parser.add_argument("--splice-indexes", type=str,
@@ -90,20 +75,15 @@ if __name__ == "__main__":
                         help="Raw feature dimension, e.g. 13")
     parser.add_argument("--ivector-dim", type=int,
                         help="iVector dimension, e.g. 100", default=0)
-    parser.add_argument("--add-lda", type=str, choices=["true", "false"],
-                        help="if true the input spliced features go through an LDA", default="true")
 
     # LSTM options
-    parser.add_argument("--num-lstm-layers", type=int,
-                        help="Number of LSTM layers to be stacked", default=1)
-    parser.add_argument("--cell-dim", type=int,
-                        help="dimension of lstm-cell")
-    parser.add_argument("--recurrent-projection-dim", type=int,
-                        help="dimension of recurrent projection")
-    parser.add_argument("--non-recurrent-projection-dim", type=int,
-                        help="dimension of non-recurrent projection")
+    parser.add_argument("--num-clstm-layers", type=int,
+                        help="Number of CLSTM layers to be stacked", default=1)
     parser.add_argument("--hidden-dim", type=int,
                         help="dimension of fully-connected layers")
+    # CLSTM options
+    parser.add_argument("--ratewise-params", type=str, default=None,
+                        help="the parameters for LSTM units operating at different rates of operation in each clockwork-lstm")
 
     # Natural gradient options
     parser.add_argument("--ng-per-element-scale-options", type=str,
@@ -126,15 +106,10 @@ if __name__ == "__main__":
     parser.add_argument("--label-delay", type=int, default=None,
                         help="option to delay the labels to make the lstm robust")
 
-    parser.add_argument("--lstm-delay", type=str, default=None,
-                        help="option to have different delays in recurrence for each lstm")
-
-
-
     print(' '.join(sys.argv))
 
     args = parser.parse_args()
-
+    print(args)
     if not os.path.exists(args.config_dir):
         os.makedirs(args.config_dir)
 
@@ -144,20 +119,29 @@ if __name__ == "__main__":
     if args.feat_dim is None or not (args.feat_dim > 0):
         sys.exit("--feat-dim argument is required")
     if args.num_targets is None or not (args.num_targets > 0):
-        sys.exit("--feat-dim argument is required")
-    if (args.num_lstm_layers < 1):
-        sys.exit("--num-lstm-layers has to be a positive integer")
+        sys.exit("--num-targets argument is required")
+    if (args.num_clstm_layers < 1):
+        sys.exit("--num-clstm-layers has to be a positive integer")
     if (args.clipping_threshold < 0):
         sys.exit("--clipping-threshold has to be a non-negative")
-    if args.lstm_delay is None:
-        lstm_delay = [-1] * args.num_lstm_layers
+    if args.ratewise_params is None:
+        ratewise_params = {'T1': {'rate':1, 'cell-dim':1024,
+                                  'recurrent-projection-dim':256,
+                                  'non-recurrent-projection-dim':256},
+                           'T2': {'rate':1.0/2, 'cell-dim':512,
+                                  'recurrent-projection-dim':128,
+                                  'non-recurrent-projection-dim':0},
+                           'T3': {'rate':1.0/4, 'cell-dim':512,
+                                  'recurrent-projection-dim':128,
+                                  'non-recurrent-projection-dim':0},
+                           'T4': {'rate':1.0/8, 'cell-dim':512,
+                                  'recurrent-projection-dim':128,
+                                  'non-recurrent-projection-dim':0}
+                          }
+
     else:
-        try:
-            lstm_delay = ParseLstmDelayString(args.lstm_delay.strip())
-        except ValueError:
-            sys.exit("--lstm-delay has incorrect format value. Provided value is '{0}'".format(args.lstm_delay))
-        if len(lstm_delay) != args.num_lstm_layers:
-            sys.exit("--lstm-delay: Number of delays provided has to match --num-lstm-layers")
+        ratewise_params = ast.literal_eval(args.ratewise_params)
+        assert(CheckRatewiseParams(ratewise_params))
 
     parsed_splice_output = ParseSpliceString(args.splice_indexes.strip(), args.label_delay)
     left_context = parsed_splice_output['left_context']
@@ -165,7 +149,7 @@ if __name__ == "__main__":
     num_hidden_layers = parsed_splice_output['num_hidden_layers']
     splice_indexes = parsed_splice_output['splice_indexes']
 
-    if (num_hidden_layers < args.num_lstm_layers):
+    if (num_hidden_layers < args.num_clstm_layers):
         sys.exit("--num-lstm-layers : number of lstm layers has to be greater than number of layers, decided based on splice-indexes")
 
     # write the files used by other scripts like steps/nnet3/get_egs.sh
@@ -188,48 +172,20 @@ if __name__ == "__main__":
     nodes.AddOutputNode(init_config_lines, prev_layer_output)
     config_files[args.config_dir + '/init.config'] = init_config_lines
 
-    if args.add_lda == "true":
-        prev_layer_output = nodes.AddLdaNode(config_lines, "L0", prev_layer_output, args.config_dir + '/lda.mat')
-    else:
-        # A noop node is added to reduce the simplify the configs, otherwise we
-        # have have to keep track of the descriptors. e.g. No other append
-        # descriptor can be applied on the top of the splice Append descriptor
-        prev_layer_output = nodes.AddNoOpNode(config_lines, "L0", prev_layer_output, args.config_dir + '/lda.mat')
+    prev_layer_output = nodes.AddLdaNode(config_lines, "L0", prev_layer_output, args.config_dir + '/lda.mat')
 
-    for i in range(args.num_lstm_layers):
-	if len(lstm_delay[i]) == 2: # BLSTM layer case, add both forward and backward
-            prev_layer_output1 = nodes.AddLstmLayer(config_lines, "BLstm{0}_forward".format(i+1), prev_layer_output, args.cell_dim,
-                                             args.recurrent_projection_dim, args.non_recurrent_projection_dim,
-                                             args.clipping_threshold, args.norm_based_clipping,
-                                             args.ng_per_element_scale_options, args.ng_affine_options,
-                                             lstm_delay = lstm_delay[i][0])
-            prev_layer_output2 = nodes.AddLstmLayer(config_lines, "BLstm{0}_backward".format(i+1), prev_layer_output, args.cell_dim,
-                                             args.recurrent_projection_dim, args.non_recurrent_projection_dim,
-                                             args.clipping_threshold, args.norm_based_clipping,
-                                             args.ng_per_element_scale_options, args.ng_affine_options,
-                                             lstm_delay = lstm_delay[i][1])
-            prev_layer_output['descriptor'] = 'Append({0}, {1})'.format(prev_layer_output1['descriptor'], prev_layer_output2['descriptor'])
-	    prev_layer_output['dimension'] = prev_layer_output1['dimension'] + prev_layer_output2['dimension']
-	else: # LSTM layer case
-	    prev_layer_output = nodes.AddLstmLayer(config_lines, "Lstm{0}".format(i+1), prev_layer_output, args.cell_dim,
-			                    args.recurrent_projection_dim, args.non_recurrent_projection_dim,
-					    args.clipping_threshold, args.norm_based_clipping,
-					    args.ng_per_element_scale_options, args.ng_affine_options,
-					    lstm_delay = lstm_delay[i][0])
+    for i in range(args.num_clstm_layers):
+        prev_layer_output = nodes.AddClstmNode(config_lines, "CLstm{0}".format(i+1), prev_layer_output,
+                                               args.clipping_threshold, args.norm_based_clipping,
+                                               args.ng_per_element_scale_options, args.ng_affine_options,
+                                               ratewise_params = ratewise_params)
         # make the intermediate config file for layerwise discriminative
         # training
         nodes.AddFinalNode(config_lines, prev_layer_output, args.num_targets, args.ng_affine_options, args.label_delay)
         config_files['{0}/layer{1}.config'.format(args.config_dir, i+1)] = config_lines
         config_lines = {'components':[], 'component-nodes':[]}
-	if len(lstm_delay[i]) == 2:
-	    # since the form 'Append(Append(xx, yy), zz)' is not allowed, here we don't wrap the descriptor with 'Append()' so that we would have the form
-	    # 'Append(xx, yy, zz)' in the next lstm layer
-	    prev_layer_output['descriptor'] = '{0}, {1}'.format(prev_layer_output1['descriptor'], prev_layer_output2['descriptor'])
 
-    if len(lstm_delay[i]) == 2:
-        # since there is no 'Append' in 'AffRelNormLayer', here we wrap the descriptor with 'Append()'
-        prev_layer_output['descriptor'] = 'Append({0})'.format(prev_layer_output['descriptor'])
-    for i in range(args.num_lstm_layers, num_hidden_layers):
+    for i in range(args.num_clstm_layers, num_hidden_layers):
         prev_layer_output = nodes.AddAffRelNormNode(config_lines, "L{0}".format(i+1),
                                                prev_layer_output, args.hidden_dim,
                                                args.ng_affine_options)
