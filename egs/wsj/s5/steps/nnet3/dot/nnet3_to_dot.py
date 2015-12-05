@@ -125,6 +125,28 @@ def ProcessAppendDescriptor(segment, parent_node_name, affix, edge_attributes = 
 
     return dot_graph
 
+def ProcessRoundDescriptor(segment, parent_node_name, affix, edge_attributes = None):
+    dot_graph = []
+
+    label = 'Round ({0})'.format(segment['arguments'][1])
+    style = None
+    if edge_attributes is not None:
+        if edge_attributes.has_key('label'):
+            label = "{0} {1}".format(edge_attributes['label'], label)
+        if edge_attributes.has_key('style'):
+            style  = 'style={0}'.format(edge_attributes['style'])
+
+    attr_string = 'label="{0}"'.format(label)
+    if style is not None:
+        attr_string += ' {0}'.format(style)
+    dot_graph.append('{0}->{1} [ {2} ]'.format(GetDotNodeName(segment['arguments'][0]),
+                                                                    GetDotNodeName(parent_node_name),
+                                                                    attr_string))
+    if segment['sub_segments']:
+        raise Exception("Round can just deal with forwarding descriptor, no sub-segments allowed")
+    return dot_graph
+
+
 def ProcessOffsetDescriptor(segment, parent_node_name, affix, edge_attributes = None):
     dot_graph = []
 
@@ -232,6 +254,8 @@ def DescriptorSegmentToDot(segment, parent_node_name, affix, edge_attributes = N
         dot_graph += ProcessIfDefinedDescriptor(segment, parent_node_name, affix, edge_attributes)
     elif segment['name'] == "ReplaceIndex":
         dot_graph += ProcessReplaceIndexDescriptor(segment, parent_node_name, affix, edge_attributes)
+    elif segment['name'] == "Round":
+        dot_graph += ProcessRoundDescriptor(segment, parent_node_name, affix, edge_attributes)
     else:
         raise Exception('Descriptor {0}, is not recognized by this script. Please add Process{0}Descriptor method'.format(segment['name']))
     return dot_graph
@@ -306,16 +330,16 @@ def Nnet3InputToDot(parsed_config):
     return ['{0} [ label="{1}\\ndim={2}"]'.format(GetDotNodeName(parsed_config['name']), parsed_config['name'], parsed_config['dim'] )]
 
 # output-node name=output input=Final_log_softmax dim=3940 objective=linear
+#output-node name=output input=Offset(Final_log_softmax, 5) dim=3940 objective=linear
 def Nnet3OutputToDot(parsed_config):
     dot_graph = []
+    dot_graph += Nnet3DescriptorToDot(parsed_config['input'], parsed_config['name'])
     dot_graph.append('{0} [ label="{1}\\nobjective={2}"]'.format(GetDotNodeName(parsed_config['name']), parsed_config['name'], parsed_config['objective']))
-    dot_graph.append('{0} -> {1}'.format(GetDotNodeName(parsed_config['input']), GetDotNodeName(parsed_config['name'])))
     return dot_graph
 
 # dim-range-node name=Lstm1_r_t input-node=Lstm1_rp_t dim-offset=0 dim=256
 def Nnet3DimrangeToDot(parsed_config):
     dot_graph = []
-    dot_graph.append(parsed_config['name'])
     dot_graph.append('{0} [shape=rectangle]'.format(GetDotNodeName(parsed_config['name'])))
     dot_graph.append('{0} -> {1} [taillabel="dimrange({2}, {3})"]'.format(GetDotNodeName(parsed_config['input-node']),
                                                            GetDotNodeName(parsed_config['name']),
