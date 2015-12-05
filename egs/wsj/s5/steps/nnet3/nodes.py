@@ -531,7 +531,6 @@ def AddCwrnnNode(config_lines,
                  input_vectorization = 'zyx',
                  clipping_threshold = 1.0,
                  norm_based_clipping = "false",
-                 ng_affine_options = "",
                  ng_per_element_scale_options = "",
                  ratewise_params = {'T1': {'rate':1, 'dim':128},
                                     'T2': {'rate':1.0/2, 'dim':128},
@@ -627,7 +626,6 @@ def AddCwrnnNode(config_lines,
                                                                                  clipping_threshold = clipping_threshold,
                                                                                  norm_based_clipping = norm_based_clipping,
                                                                                  ng_per_element_scale_options = ng_per_element_scale_options,
-                                                                                 ng_affine_options = ng_affine_options,
                                                                                  lstm_delay = -1 * time_period,
                                                                                  slowrate_descriptors = slow_to_fast_descriptors[key],
                                                                                  fastrate_params = fastrate_params,
@@ -647,7 +645,6 @@ def AddCwrnnNode(config_lines,
                                                                                 params['rate'],
                                                                                 clipping_threshold = clipping_threshold,
                                                                                 norm_based_clipping = norm_based_clipping,
-                                                                                ng_affine_options = ng_affine_options,
                                                                                 delay = -1 * time_period,
                                                                                 slowrate_descriptors = slow_to_fast_descriptors[key],
                                                                                 fastrate_params = fastrate_params,
@@ -664,7 +661,7 @@ def AddCwrnnRateUnit(config_lines,
                     unit_rate,
                     clipping_threshold = 1.0,
                     norm_based_clipping = "false",
-                    ng_affine_options = "",
+                    ng_affine_options = " bias-stddev=0 ",
                     delay = -1,
                     slowrate_descriptors = {},
                     fastrate_params = {},
@@ -678,7 +675,7 @@ def AddCwrnnRateUnit(config_lines,
     if nonlinearity == "RectifiedLinearComponent+NormalizeComponent":
         raise Exception("{0} is not yet supported".format(nonlinearity))
     if diag_init_scaling_factor != 0:
-        recurrent_ng_affine_options = "{0} diag-init-scaling-factor={1}".format(ng_affine_options, diag_init_scaling_factor)
+        recurrent_ng_affine_options = " diag-init-scaling-factor={0}".format(diag_init_scaling_factor)
         nonrecurrent_ng_affine_options = "{0} param-stddev={1}".format(ng_affine_options, diag_init_scaling_factor)
     else:
         recurrent_ng_affine_options = ng_affine_options

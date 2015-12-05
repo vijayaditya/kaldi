@@ -20,8 +20,6 @@ def PrintConfig(file_name, config_lines):
 
 def ParseSpliceString(splice_indexes, label_delay=None):
     ## Work out splice_array e.g. splice_array = [ [ -3,-2,...3 ], [0], [-2,2], .. [ -8,8 ] ]
-
-
     splice_array = []
     left_context = 0
     right_context = 0
@@ -154,7 +152,7 @@ if __name__ == "__main__":
             # I just assume the prev_layer_output_descriptor is a simple forwarding descriptor
             prev_layer_output_descriptor = prev_layer_output['descriptor']
             subset_output = prev_layer_output
-            if args.sub0:
+            if args.subset_dim > 0:
                 # if subset_dim is specified the script expects a zero in the splice indexes
                 assert(zero_index is not None)
                 subset_node_config = "dim-range-node name=Tdnn_input_{0} input-node={1} dim-offset={2} dim={3}".format(i, prev_layer_output_descriptor, 0, args.subset_dim)

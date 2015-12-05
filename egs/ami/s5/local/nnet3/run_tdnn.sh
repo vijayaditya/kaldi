@@ -19,6 +19,8 @@ common_egs_dir=
 splice_indexes="-2,-1,0,1,2 -1,2 -3,3 -7,2 -3,3 0 0"
 subset_dim=0
 remove_egs=true
+relu_dim=850
+num_epochs=3
 
 . cmd.sh
 . ./path.sh
@@ -63,7 +65,7 @@ if [ $stage -le 8 ]; then
   fi
 
   steps/nnet3/tdnn/train.sh --stage $train_stage \
-    --num-epochs 3 --num-jobs-initial 2 --num-jobs-final 12 \
+    --num-epochs $num_epochs --num-jobs-initial 2 --num-jobs-final 12 \
     --splice-indexes "$splice_indexes" \
     --subset-dim "$subset_dim" \
     --feat-type raw \
@@ -72,7 +74,7 @@ if [ $stage -le 8 ]; then
     --egs-dir "$common_egs_dir" \
     --initial-effective-lrate 0.0015 --final-effective-lrate 0.00015 \
     --cmd "$decode_cmd" \
-    --relu-dim 850 \
+    --relu-dim "$relu_dim" \
     --remove-egs "$remove_egs" \
     data/$mic/${train_set}_hires data/lang $ali_dir $dir  || exit 1;
 fi
