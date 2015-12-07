@@ -79,6 +79,8 @@ shrink=0.99  # this parameter would be used to scale the parameter matrices
 shrink_threshold=0.15  # a value less than 0.25 that we compare the mean of
                        # 'deriv-avg' for sigmoid components with, and if it's
                        # less, we shrink.
+epsilon=0.05    # regularization constant for perturbed training.
+perturb_proportion=1.0 # proportion of examples on which we do perturbed training.
 # for ReLU networks we use fix nnet in place of shrink
 fix_nnet=false
 min_average=0.05
@@ -198,6 +200,14 @@ data=$1
 lang=$2
 alidir=$3
 dir=$4
+
+perturb_train_opts=
+train_suffix=
+perturb_proportion_is_zero=$(echo "$perturb_proportion==0"|bc)
+if [ $perturb_proportion_is_zero -eq 0 ]; then
+  perturb_train_opts=" --perturb-proportion=$perturb_proportion --epsilon=$epsilon "
+  train_suffix="-perturbed"
+fi
 
 if [ ! -z "$realign_times" ]; then
   [ -z "$align_cmd" ] && echo "$0: realign_times specified but align_cmd not specified" && exit 1
@@ -608,7 +618,8 @@ while [ $x -lt $num_iters ]; do
                                                # the other indexes from.
         archive=$[($k%$num_archives)+1]; # work out the 1-based archive index.
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
-          nnet3-train $parallel_train_opts --print-interval=10 --momentum=$momentum \
+          nnet3-train$train_suffix $parallel_train_opts $perturb_train_opts \
+          --print-interval=10 --momentum=$momentum \
           --max-param-change=$max_param_change \
           --optimization.min-deriv-time=$min_deriv_time "$raw" \
           "ark:nnet3-copy-egs $context_opts ark:$cur_egs_dir/egs.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_num_chunk_per_minibatch --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \

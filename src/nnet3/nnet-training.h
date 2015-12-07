@@ -162,6 +162,7 @@ class NnetTrainer {
   // normal case there will be just one output layer named "output".
   // So we store the objective functions per output layer.
   int32 num_minibatches_processed_;
+  int32 num_minibatches_processed2_;
 
   unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info_;
   unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info2_;

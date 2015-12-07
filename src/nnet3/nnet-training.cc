@@ -87,6 +87,8 @@ void NnetTrainer::Train(const NnetExample &eg) {
 void NnetPerturbedTrainer::Train(const NnetExample &eg) {
   bool need_model_derivative = true;
   NnetExample eg_perturbed(eg);
+
+  KALDI_LOG << "HERE4";
   if (RandInt(0, 100) < config_.perturb_proportion * 100) {
     KALDI_LOG << "training with epsilon with " << config_.epsilon;
     ComputationRequest request;
@@ -102,7 +104,7 @@ void NnetPerturbedTrainer::Train(const NnetExample &eg) {
     computer.AcceptInputs(*nnet_, eg.io);
     computer.Forward();
   
-    this->ProcessOutputs(eg, &computer);
+    this->ProcessOutputs2(eg, &computer);
     computer.Backward();
  
     int32 minibatch_size = 0;
@@ -117,6 +119,7 @@ void NnetPerturbedTrainer::Train(const NnetExample &eg) {
       KALDI_ERR << "Currently this experimental recipe only supports training with ivectors~~~";
     }
     
+    KALDI_LOG << "HERE4";
     CuVector<BaseFloat> deriv_norm(minibatch_size);
     std::vector<CuMatrix<BaseFloat> > input_derivs;
     for (size_t i = 0; i < eg_perturbed.io.size(); i++) {
@@ -149,6 +152,8 @@ void NnetPerturbedTrainer::Train(const NnetExample &eg) {
       }
     }
     deriv_norm.ApplyPow(0.5);
+
+    KALDI_LOG << "HERE5";
     if (deriv_norm.Norm(2.0) > 0) {
       for (size_t i = 0; i < eg_perturbed.io.size(); i++) {
         NnetIo io = eg_perturbed.io[i];
@@ -192,6 +197,7 @@ void NnetPerturbedTrainer::Train(const NnetExample &eg) {
   
     const NnetComputation *computation = compiler_.Compile(request);
   
+    KALDI_LOG << "HERE6";
     NnetComputer computer(config_.compute_config, *computation,
                           *nnet_,
                           (delta_nnet_ == NULL ? nnet_ : delta_nnet_));
@@ -199,9 +205,10 @@ void NnetPerturbedTrainer::Train(const NnetExample &eg) {
     computer.AcceptInputs(*nnet_, eg_perturbed.io);
     computer.Forward();
   
-    this->ProcessOutputs2(eg_perturbed, &computer);
+    this->ProcessOutputs(eg_perturbed, &computer);
     computer.Backward();
     
+    KALDI_LOG << "HERE7";
     if (delta_nnet_ != NULL) {
       BaseFloat scale = (1.0 - config_.momentum);
       if (config_.max_param_change != 0.0) {
@@ -217,12 +224,14 @@ void NnetPerturbedTrainer::Train(const NnetExample &eg) {
                       << "--max-param-change=" << config_.max_param_change
                       << ", scaling by " << config_.max_param_change / param_delta;
           }
+        KALDI_LOG << "HERE8";
         }
       }
       AddNnet(*delta_nnet_, scale, nnet_);
       ScaleNnet(config_.momentum, delta_nnet_);
     }
   }
+  KALDI_LOG << "HERE9";
 }
 
 void NnetTrainer::ProcessOutputs(const NnetExample &eg,
@@ -263,7 +272,7 @@ void NnetTrainer::ProcessOutputs2(const NnetExample &eg,
                                supply_deriv, computer,
                                &tot_weight, &tot_objf);
       objf_info2_[io.name].UpdateStats(io.name, config_.print_interval,
-                                      num_minibatches_processed_++,
+                                      num_minibatches_processed2_++,
                                       tot_weight, tot_objf);
     }
   }

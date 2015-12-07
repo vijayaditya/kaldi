@@ -52,6 +52,8 @@ num_jobs_final=12
 momentum=0.5
 shrink=0.99
 shrink_threshold=0.125
+epsilon=0.05    # regularization constant for perturbed training.
+perturb_proportion=0.0 # proportion of examples on which we do perturbed training.
 num_chunk_per_minibatch=100
 frames_per_iter=400000
 remove_egs=true
@@ -146,6 +148,8 @@ if [ $stage -le 8 ]; then
     --num-cwrnn-layers $num_cwrnn_layers \
     --hidden-dim $hidden_dim \
     --clipping-threshold $clipping_threshold \
+    --perturb-proportion "$perturb_proportion" \
+    --epsilon "$epsilon" \
     --chunk-width $chunk_width \
     --chunk-left-context $chunk_left_context \
     --norm-based-clipping $norm_based_clipping \
