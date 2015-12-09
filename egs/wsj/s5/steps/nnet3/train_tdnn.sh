@@ -20,10 +20,12 @@ pnorm_input_dim=3000
 pnorm_output_dim=300
 relu_dim=  # you can use this to make it use ReLU's instead of p-norms.
 rand_prune=4.0 # Relates to a speedup we do for LDA.
+chunk_width=20  # number of output labels in the sequence used to train an LSTM
+num_chunk_per_minibatch=100  # number of sequences to be processed in parallel every mini-batch
 minibatch_size=512  # This default is suitable for GPU-based training.
                     # Set it to 128 for multi-threaded CPU-based training.
 max_param_change=2.0  # max param change per minibatch
-samples_per_iter=400000 # each iteration of training, see this many samples
+samples_per_iter=200000 # each iteration of training, see this many samples
                         # per job.  This option is passed to get_egs.sh
 num_jobs_initial=1  # Number of neural net jobs to run in parallel at the start of training
 num_jobs_final=8   # Number of neural net jobs to run in parallel at the end of training
@@ -77,7 +79,6 @@ realign_times=          # List of times on which we realign.  Each time is
                         # number.
 num_jobs_align=30       # Number of jobs for realignment
 # End configuration section.
-frames_per_eg=8 # to be passed on to get_egs.sh
 
 trap 'for pid in $(jobs -pr); do kill -KILL $pid; done' INT QUIT TERM
 
@@ -233,7 +234,7 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   steps/nnet3/get_egs.sh $egs_opts "${extra_opts[@]}" \
       --samples-per-iter $samples_per_iter --stage $get_egs_stage \
       --cmd "$cmd" $egs_opts \
-      --frames-per-eg $frames_per_eg \
+      --frames-per-eg $chunk_width \
       $data $alidir $dir/egs || exit 1;
 fi
 
@@ -259,19 +260,14 @@ egs_right_context=$(cat $egs_dir/info/right_context) || exit -1
    [ $egs_right_context -lt $right_context ] ) && \
    echo "$0: egs in $egs_dir have too little context" && exit -1;
 
-frames_per_eg=$(cat $egs_dir/info/frames_per_eg) || { echo "error: no such file $egs_dir/info/frames_per_eg"; exit 1; }
+chunk_width=$(cat $egs_dir/info/frames_per_eg) || { echo "error: no such file $egs_dir/info/frames_per_eg"; exit 1; }
 num_archives=$(cat $egs_dir/info/num_archives) || { echo "error: no such file $egs_dir/info/frames_per_eg"; exit 1; }
-
-# num_archives_expanded considers each separate label-position from
-# 0..frames_per_eg-1 to be a separate archive.
-num_archives_expanded=$[$num_archives*$frames_per_eg]
 
 [ $num_jobs_initial -gt $num_jobs_final ] && \
   echo "$0: --initial-num-jobs cannot exceed --final-num-jobs" && exit 1;
 
 [ $num_jobs_final -gt $num_archives_expanded ] && \
   echo "$0: --final-num-jobs cannot exceed #archives $num_archives_expanded." && exit 1;
-
 
 if [ $stage -le -3 ]; then
   echo "$0: getting preconditioning matrix for input features."
@@ -337,7 +333,7 @@ fi
 # times, i.e. $num_iters*$avg_num_jobs) == $num_epochs*$num_archives_expanded,
 # where avg_num_jobs=(num_jobs_initial+num_jobs_final)/2.
 
-num_archives_to_process=$[$num_epochs*$num_archives_expanded]
+num_archives_to_process=$[$num_epochs*$num_archives]
 num_archives_processed=0
 num_iters=$[($num_archives_to_process*2)/($num_jobs_initial+$num_jobs_final)]
 
@@ -489,14 +485,14 @@ while [ $x -lt $num_iters ]; do
       raw="nnet3-am-copy --raw=true --learning-rate=$this_learning_rate $dir/$x.mdl -|"
     fi
     if $do_average; then
-      this_minibatch_size=$minibatch_size
+      this_num_chunk_per_minibatch=$num_chunk_per_minibatch
     else
       # on iteration zero or when we just added a layer, use a smaller minibatch
       # size (and we will later choose the output of just one of the jobs): the
       # model-averaging isn't always helpful when the model is changing too fast
       # (i.e. it can worsen the objective function), and the smaller minibatch
       # size will help to keep the update stable.
-      this_minibatch_size=$[$minibatch_size/2];
+      this_num_chunk_per_minibatch=$[$num_chunk_per_minibatch/2];
     fi
 
     rm $dir/.error 2>/dev/null
@@ -506,11 +502,12 @@ while [ $x -lt $num_iters ]; do
       # we only wait for the training jobs that we just spawned,
       # not the diagnostic jobs that we spawned above.
 
-      # We can't easily use a single parallel SGE job to do the main training,
+      # We cant easily use a single parallel SGE job to do the main training,
       # because the computation of which archive and which --frame option
       # to use for each job is a little complex, so we spawn each one separately.
+
       for n in $(seq $this_num_jobs); do
-        k=$[$num_archives_processed + $n - 1]; # k is a zero-based index that we'll derive
+        k=$[$num_archives_processed + $n - 1]; # k is a zero-based index that well derive
                                                # the other indexes from.
         archive=$[($k%$num_archives)+1]; # work out the 1-based archive index.
         frame=$[(($k/$num_archives)%$frames_per_eg)]; # work out the 0-based frame
@@ -521,7 +518,7 @@ while [ $x -lt $num_iters ]; do
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
           nnet3-train $parallel_train_opts \
           --max-param-change=$max_param_change "$raw" \
-          "ark:nnet3-copy-egs --frame=$frame $context_opts ark:$cur_egs_dir/egs.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_minibatch_size --discard-partial-minibatches=true ark:- ark:- |" \
+          "ark:nnet3-copy-egs $context_opts ark:$cur_egs_dir/egs.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_num_chunk_per_minibatch --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
       wait

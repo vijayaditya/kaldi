@@ -198,12 +198,12 @@ if __name__ == "__main__":
 
     for i in range(args.num_lstm_layers):
 	if len(lstm_delay[i]) == 2: # BLSTM layer case, add both forward and backward
-            prev_layer_output1 = nodes.AddLstmLayer(config_lines, "BLstm{0}_forward".format(i+1), prev_layer_output, args.cell_dim,
+            prev_layer_output1 = nodes.AddLstmNode(config_lines, "BLstm{0}_forward".format(i+1), prev_layer_output, args.cell_dim,
                                              args.recurrent_projection_dim, args.non_recurrent_projection_dim,
                                              args.clipping_threshold, args.norm_based_clipping,
                                              args.ng_per_element_scale_options, args.ng_affine_options,
                                              lstm_delay = lstm_delay[i][0])
-            prev_layer_output2 = nodes.AddLstmLayer(config_lines, "BLstm{0}_backward".format(i+1), prev_layer_output, args.cell_dim,
+            prev_layer_output2 = nodes.AddLstmNode(config_lines, "BLstm{0}_backward".format(i+1), prev_layer_output, args.cell_dim,
                                              args.recurrent_projection_dim, args.non_recurrent_projection_dim,
                                              args.clipping_threshold, args.norm_based_clipping,
                                              args.ng_per_element_scale_options, args.ng_affine_options,
@@ -211,7 +211,7 @@ if __name__ == "__main__":
             prev_layer_output['descriptor'] = 'Append({0}, {1})'.format(prev_layer_output1['descriptor'], prev_layer_output2['descriptor'])
 	    prev_layer_output['dimension'] = prev_layer_output1['dimension'] + prev_layer_output2['dimension']
 	else: # LSTM layer case
-	    prev_layer_output = nodes.AddLstmLayer(config_lines, "Lstm{0}".format(i+1), prev_layer_output, args.cell_dim,
+	    prev_layer_output = nodes.AddLstmNode(config_lines, "Lstm{0}".format(i+1), prev_layer_output, args.cell_dim,
 			                    args.recurrent_projection_dim, args.non_recurrent_projection_dim,
 					    args.clipping_threshold, args.norm_based_clipping,
 					    args.ng_per_element_scale_options, args.ng_affine_options,
