@@ -150,6 +150,28 @@ if [ $stage -le 11 ]; then
   done
 fi
 
+if [ $stage -le 12 ]; then
+  # By default we do not build systems adapted to sessions for AMI in distant scnearios
+  # as this does not help a lot (around 1%), but one can do this by running below code:
+  # Train tri4a, which is LDA+MLLT+SAT,
+  steps/align_fmllr.sh --nj $nj --cmd "$train_cmd" \
+    data/$mic/train data/lang exp/$mic/tri3a exp/$mic/tri3a_ali-fmllr
+
+  steps/train_sat.sh  --cmd "$train_cmd" \
+    5000 80000 data/$mic/train data/lang exp/$mic/tri3a_ali-fmllr exp/$mic/tri4a
+
+  # Decode,
+  graph_dir=exp/$mic/tri4a/graph_${LM}
+  $highmem_cmd $graph_dir/mkgraph.log \
+    utils/mkgraph.sh data/lang_${LM} exp/$mic/tri4a $graph_dir
+  steps/decode_fmllr.sh --nj $nj_dev --cmd "$decode_cmd" --config conf/decode.conf \
+    $graph_dir data/$mic/dev exp/$mic/tri4a/decode_dev_${LM}
+  steps/decode_fmllr.sh --nj $nj_eval --cmd "$decode_cmd" --config conf/decode.conf \
+    $graph_dir data/$mic/eval exp/$mic/tri4a/decode_eval_${LM}
+
+fi
+exit ;
+
 # DNN training. This script is based on egs/swbd/s5b/local/run_dnn.sh
 # Some of them would be out of date.
 if [ $stage -le 12 ]; then
@@ -169,16 +191,19 @@ if [ $stage -le 13 ]; then
     --gmm-dir exp/$mic/tri3a \
     --srcdir exp/$mic/nnet2_online/nnet_ms_sp
 fi
+exit;
+
+# be very careful and change the stage to 10  when running multiple nnet3 systems
+# this will avoid overwriting the ivector extractor
 
 #TDNN training (nnet3)
 if [ $stage -le 14 ]; then
   local/nnet3/run_tdnn.sh \
     --mic $mic \
     --speed-perturb true \
-    --stage 9 \
     --use-sat-alignments false
 fi
-exit 1;
+exit;
 
 #LSTM training (nnet3)
 if [ $stage -le 15 ]; then
@@ -188,27 +213,16 @@ if [ $stage -le 15 ]; then
     --speed-perturb true \
     --use-sat-alignments false
 fi
-
-echo "Done."
-
-
-# By default we do not build systems adapted to sessions for AMI in distant scnearios
-# as this does not help a lot (around 1%), but one can do this by running below code:
 exit;
 
-# Train tri4a, which is LDA+MLLT+SAT,
-steps/align_fmllr.sh --nj $nj --cmd "$train_cmd" \
-  data/$mic/train data/lang exp/$mic/tri3a exp/$mic/tri3a_ali-fmllr
+# BLSTM training (nnet3)
+if [ $stage -le 16 ]; then
+  local/nnet3/run_blstm.sh \
+    --mic $mic \
+    --train-stage -5 \
+    --speed-perturb true \
+    --use-sat-alignments false
+fi
+exit;
 
-steps/train_sat.sh  --cmd "$train_cmd" \
-  5000 80000 data/$mic/train data/lang exp/$mic/tri3a_ali-fmllr exp/$mic/tri4a
-
-# Decode,
-graph_dir=exp/$mic/tri4a/graph_${LM}
-$highmem_cmd $graph_dir/mkgraph.log \
-  utils/mkgraph.sh data/lang_${LM} exp/$mic/tri4a $graph_dir
-steps/decode_fmllr.sh --nj $nj_dev --cmd "$decode_cmd" --config conf/decode.conf \
-  $graph_dir data/$mic/dev exp/$mic/tri4a/decode_dev_${LM}
-steps/decode_fmllr.sh --nj $nj_eval --cmd "$decode_cmd" --config conf/decode.conf \
-  $graph_dir data/$mic/eval exp/$mic/tri4a/decode_eval_${LM}
-
+echo "Done."

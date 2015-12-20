@@ -57,6 +57,7 @@ splice_indexes="-4,-3,-2,-1,0,1,2,3,4  0  -2,2  0  -4,4 0"
 # Format : layer<hidden_layer>/<frame_indices>....layer<hidden_layer>/<frame_indices> "
 # note: hidden layers which are composed of one or more components,
 # so hidden layer indexing is different from component count
+chunk_training=false  # if true training is done with chunk randomization, rather than frame randomization
 
 randprune=4.0 # speeds up LDA.
 use_gpu=true    # if true, we run on GPU.
@@ -266,7 +267,11 @@ num_archives=$(cat $egs_dir/info/num_archives) || { echo "error: no such file $e
 
 # num_archives_expanded considers each separate label-position from
 # 0..frames_per_eg-1 to be a separate archive.
-num_archives_expanded=$[$num_archives*$frames_per_eg]
+if [ "$chunk_training" == "true" ]; then
+  num_archives_expanded=$num_archives
+else
+  num_archives_expanded=$[$num_archives*$frames_per_eg]
+fi
 
 [ $num_jobs_initial -gt $num_jobs_final ] && \
   echo "$0: --initial-num-jobs cannot exceed --final-num-jobs" && exit 1;

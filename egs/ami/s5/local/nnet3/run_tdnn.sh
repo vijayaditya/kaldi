@@ -58,7 +58,7 @@ local/nnet3/run_ivector_common.sh --stage $stage \
   --use-sat-alignments $use_sat_alignments \
   --speed-perturb $speed_perturb || exit 1;
 
-if [ $stage -le 8 ]; then
+if [ $stage -le 10 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
      /export/b0{3,4,5,6}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
@@ -79,7 +79,7 @@ if [ $stage -le 8 ]; then
     data/$mic/${train_set}_hires data/lang $ali_dir $dir  || exit 1;
 fi
 
-if [ $stage -le 9 ]; then
+if [ $stage -le 11 ]; then
   # this version of the decoding treats each utterance separately
   # without carrying forward speaker information.
   for decode_set in dev eval; do

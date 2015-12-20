@@ -18,6 +18,7 @@ train_stage=-10
 has_fisher=true
 mic=ihm
 use_sat_alignments=true
+use_ihm_ali=false 
 affix=
 speed_perturb=true
 common_egs_dir=
@@ -77,37 +78,35 @@ fi
 use_delay=false
 if [ $label_delay -gt 0 ]; then use_delay=true; fi
 
-dir=exp/$mic/nnet3/lstm${speed_perturb:+_sp}${affix:+_$affix}${use_delay:+_ld$label_delay}
-if [ "$use_sat_alignments" == "true" ] ; then
-  gmm_dir=exp/$mic/tri4a
-else
-  gmm_dir=exp/$mic/tri3a
-fi
 
-if [ "$speed_perturb" == "true" ]; then
-  train_set=train_sp
-  ali_dir=${gmm_dir}_sp_ali
+
+local/nnet3/run_ivector_common.sh --stage $stage \
+  --mic $mic \
+  --use-sat-alignments $use_sat_alignments \
+  --use-ihm-ali $use_ihm_ali \
+  --speed-perturb $speed_perturb || exit 1;
+
+if [ $use_ihm_ali == "true" ]; then
+  gmm_dir=exp/ihm/tri4a
+  ali_dir=${gmm_dir}_train_parallel_sp_ali
+  mic=${mic}_cleanali
 else
-  train_set=train
-  ali_dir=${gmm_dir}_ali
+  gmm_dir=exp/$mic/tri4a
+  ali_dir=${gmm_dir}_train_sp_ali
 fi
 
 final_lm=`cat data/local/lm/final_lm`
 LM=$final_lm.pr1-7
 graph_dir=$gmm_dir/graph_${LM}
+dir=exp/$mic/nnet3/lstm${affix:+_$affix}${use_delay:+_ld$label_delay}
 
-local/nnet3/run_ivector_common.sh --stage $stage \
-  --mic $mic \
-  --use-sat-alignments $use_sat_alignments \
-  --speed-perturb $speed_perturb || exit 1;
-
-if [ $stage -le 8 ]; then
+if [ $stage -le 10 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
-     /export/b0{3,4,5,6}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
+     /export/b0{3,5,6,7}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
   fi
   if [ "$use_ivectors" == "true" ]; then
-    ivector_opts=" --online-ivector-dir exp/$mic/nnet3/ivectors_${train_set}_hires "
+    ivector_opts=" --online-ivector-dir exp/$mic/nnet3/ivectors_train_sp_hires "
     cmvn_opts="--norm-means=false --norm-vars=false"
   else
     ivector_opts=
@@ -140,10 +139,10 @@ if [ $stage -le 8 ]; then
     --chunk-right-context $chunk_right_context \
     --egs-dir "$common_egs_dir" \
     --remove-egs $remove_egs \
-    data/$mic/${train_set}_hires data/lang $ali_dir $dir  || exit 1;
+    data/$mic/train_sp_hires data/lang $ali_dir $dir  || exit 1;
 fi
 
-if [ $stage -le 9 ]; then
+if [ $stage -le 11 ]; then
   if [ -z $extra_left_context ]; then
     extra_left_context=$chunk_left_context
   fi
