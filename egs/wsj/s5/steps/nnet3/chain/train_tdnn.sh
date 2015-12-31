@@ -33,7 +33,8 @@ lm_opts=   # options to chain-est-phone-lm
 frames_per_iter=800000  # each iteration of training, see this many [input]
                         # frames per job.  This option is passed to get_egs.sh.
                         # Aim for about a minute of training time
-right_tolerance=10
+right_tolerance=5
+left_tolerance=5
 denominator_scale=1.0 # relates to tombsone stuff.
 num_jobs_initial=1  # Number of neural net jobs to run in parallel at the start of training
 num_jobs_final=8   # Number of neural net jobs to run in parallel at the end of training
@@ -250,6 +251,8 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   steps/nnet3/chain/get_egs.sh $egs_opts "${extra_opts[@]}" \
       --frames-per-iter $frames_per_iter --stage $get_egs_stage \
       --cmd "$cmd" \
+      --right-tolerance "$right_tolerance" \
+      --left-tolerance "$left_tolerance" \
       --frames-per-eg $frames_per_eg \
       --frame-subsampling-factor $frame_subsampling_factor \
       $data $dir $latdir $dir/egs || exit 1;
