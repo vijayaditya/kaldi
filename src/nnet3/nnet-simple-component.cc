@@ -421,8 +421,6 @@ void SigmoidComponent::StoreStats(const CuMatrixBase<BaseFloat> &out_value) {
   StoreStatsInternal(out_value, &temp_deriv);
 }
 
-
-
 void NoOpComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                                  const CuMatrixBase<BaseFloat> &in,
                                  CuMatrixBase<BaseFloat> *out) const {
@@ -2032,6 +2030,7 @@ void NaturalGradientAffineComponent::Read(std::istream &is, bool binary) {
 void NaturalGradientAffineComponent::InitFromConfig(ConfigLine *cfl) {
   bool ok = true;
   std::string matrix_filename;
+  BaseFloat diag_init_scaling_factor = 0;
   BaseFloat num_samples_history = 2000.0, alpha = 4.0,
       max_change_per_sample = 0.0;
   int32 input_dim = -1, output_dim = -1, rank_in = 20, rank_out = 80,
@@ -2054,6 +2053,14 @@ void NaturalGradientAffineComponent::InitFromConfig(ConfigLine *cfl) {
     if (cfl->GetValue("output-dim", &output_dim))
       KALDI_ASSERT(output_dim == OutputDim() &&
                    "output-dim mismatch vs. matrix.");
+  } else if (cfl->GetValue("diag-init-scaling-factor",
+                           &diag_init_scaling_factor))  {
+    ok = ok && cfl->GetValue("input-dim", &input_dim);
+    ok = ok && cfl->GetValue("output-dim", &output_dim);
+    Init(input_dim, output_dim,
+         rank_in, rank_out, update_period,
+         num_samples_history, alpha, max_change_per_sample,
+         diag_init_scaling_factor);
   } else {
     ok = ok && cfl->GetValue("input-dim", &input_dim);
     ok = ok && cfl->GetValue("output-dim", &output_dim);
@@ -2105,6 +2112,34 @@ void NaturalGradientAffineComponent::Init(
   bias_params_.Resize(output_dim);
   linear_params_.CopyFromMat(mat.Range(0, output_dim, 0, input_dim));
   bias_params_.CopyColFromMat(mat, input_dim);
+  is_gradient_ = false;  // not configurable; there's no reason you'd want this
+  update_count_ = 0.0;
+  active_scaling_count_ = 0.0;
+  max_change_scale_stats_ = 0.0;
+}
+
+
+// This initialization will be used in Identity initialized RNNs, where the
+// weight matrix has identity matrix (or scaled identity matrix) initialization
+// and the bias vector has zero initialization
+void NaturalGradientAffineComponent::Init(int32 input_dim, int32 output_dim,
+    int32 rank_in, int32 rank_out,
+    int32 update_period, BaseFloat num_samples_history, BaseFloat alpha,
+    BaseFloat max_change_per_sample,
+    BaseFloat diag_init_scaling_factor) {
+  rank_in_ = rank_in;
+  rank_out_ = rank_out;
+  update_period_ = update_period;
+  num_samples_history_ = num_samples_history;
+  alpha_ = alpha;
+  SetNaturalGradientConfigs();
+  KALDI_ASSERT(max_change_per_sample >= 0.0);
+  max_change_per_sample_ = max_change_per_sample;
+  linear_params_.Resize(output_dim, input_dim, kSetZero);
+  for (int32 i = 0; i < std::min(input_dim, output_dim); i++) {
+    linear_params_(i, i) = diag_init_scaling_factor;
+  }
+  bias_params_.Resize(output_dim, kSetZero);
   is_gradient_ = false;  // not configurable; there's no reason you'd want this
   update_count_ = 0.0;
   active_scaling_count_ = 0.0;
@@ -2910,6 +2945,7 @@ ConvolutionComponent::ConvolutionComponent():
     input_x_dim_(0), input_y_dim_(0), input_z_dim_(0),
     filt_x_dim_(0), filt_y_dim_(0),
     filt_x_step_(0), filt_y_step_(0),
+    has_bias_(false),
     input_vectorization_(kZyx),
     is_gradient_(false) {}
 
@@ -2923,6 +2959,7 @@ ConvolutionComponent::ConvolutionComponent(
     filt_y_dim_(component.filt_y_dim_),
     filt_x_step_(component.filt_x_step_),
     filt_y_step_(component.filt_y_step_),
+    has_bias_(component.has_bias_),
     input_vectorization_(component.input_vectorization_),
     filter_params_(component.filter_params_),
     bias_params_(component.bias_params_),
@@ -2935,7 +2972,7 @@ ConvolutionComponent::ConvolutionComponent(
     int32 filt_x_dim, int32 filt_y_dim,
     int32 filt_x_step, int32 filt_y_step,
     TensorVectorizationType input_vectorization,
-    BaseFloat learning_rate):
+    BaseFloat learning_rate, bool is_updatable):
     input_x_dim_(input_x_dim),
     input_y_dim_(input_y_dim),
     input_z_dim_(input_z_dim),
@@ -2950,6 +2987,7 @@ ConvolutionComponent::ConvolutionComponent(
                bias_params.Dim() != 0);
   KALDI_ASSERT(filter_params.NumCols() == filt_x_dim * filt_y_dim * input_z_dim);
   SetLearningRate(learning_rate);
+  SetUpdatableStatus(is_updatable);
   is_gradient_ = false;
 }
 
@@ -2968,6 +3006,7 @@ int32 ConvolutionComponent::OutputDim() const {
 
 // initialize the component using hyperparameters
 void ConvolutionComponent::Init(
+    bool is_updatable,
     int32 input_x_dim, int32 input_y_dim, int32 input_z_dim,
     int32 filt_x_dim, int32 filt_y_dim,
     int32 filt_x_step, int32 filt_y_step, int32 num_filters,
@@ -2991,15 +3030,19 @@ void ConvolutionComponent::Init(
   filter_params_.Scale(param_stddev);
   bias_params_.SetRandn();
   bias_params_.Scale(bias_stddev);
+  has_bias_ = false;
+  SetUpdatableStatus(is_updatable);
 }
 
 // initialize the component using predefined matrix file
 void ConvolutionComponent::Init(
+    bool is_updatable,
     int32 input_x_dim, int32 input_y_dim, int32 input_z_dim,
     int32 filt_x_dim, int32 filt_y_dim,
     int32 filt_x_step, int32 filt_y_step,
     TensorVectorizationType input_vectorization,
     std::string matrix_filename) {
+  is_updatable_ = is_updatable;
   input_x_dim_ = input_x_dim;
   input_y_dim_ = input_y_dim;
   input_z_dim_ = input_z_dim;
@@ -3017,6 +3060,7 @@ void ConvolutionComponent::Init(
   bias_params_.Resize(num_filters);
   filter_params_.CopyFromMat(mat.Range(0, num_filters, 0, filter_dim));
   bias_params_.CopyColFromMat(mat, filter_dim);
+  has_bias_ = false;
 }
 
 // display information about component
@@ -3031,7 +3075,8 @@ std::string ConvolutionComponent::Info() const {
          << ", filt-x-step=" << filt_x_step_
          << ", filt-y-step=" << filt_y_step_
          << ", input-vectorization=" << input_vectorization_
-         << ", num-filters=" << filter_params_.NumRows();
+         << ", num-filters=" << filter_params_.NumRows()
+         << ", is-updatable=" << IsUpdatable();
   PrintParameterStats(stream, "filter-params", filter_params_);
   PrintParameterStats(stream, "bias-params", bias_params_, true);  
   return stream.str();
@@ -3040,6 +3085,7 @@ std::string ConvolutionComponent::Info() const {
 // initialize the component using configuration file
 void ConvolutionComponent::InitFromConfig(ConfigLine *cfl) {
   bool ok = true;
+  bool is_updatable = true;
   std::string matrix_filename;
   int32 input_x_dim = -1, input_y_dim = -1, input_z_dim = -1,
         filt_x_dim = -1, filt_y_dim = -1,
@@ -3047,6 +3093,7 @@ void ConvolutionComponent::InitFromConfig(ConfigLine *cfl) {
         num_filters = -1;
   std::string input_vectorization_order = "zyx";
   InitLearningRatesFromConfig(cfl);
+  cfl->GetValue("is-updatable", &is_updatable); //optional
   ok = ok && cfl->GetValue("input-x-dim", &input_x_dim);
   ok = ok && cfl->GetValue("input-y-dim", &input_y_dim);
   ok = ok && cfl->GetValue("input-z-dim", &input_z_dim);
@@ -3072,7 +3119,7 @@ void ConvolutionComponent::InitFromConfig(ConfigLine *cfl) {
 
   if (cfl->GetValue("matrix", &matrix_filename)) {
     // initialize from prefined parameter matrix
-    Init(input_x_dim, input_y_dim, input_z_dim,
+    Init(is_updatable, input_x_dim, input_y_dim, input_z_dim,
          filt_x_dim, filt_y_dim,
          filt_x_step, filt_y_step,
          input_vectorization,
@@ -3086,7 +3133,7 @@ void ConvolutionComponent::InitFromConfig(ConfigLine *cfl) {
     BaseFloat param_stddev = 1.0 / std::sqrt(filter_input_dim), bias_stddev = 1.0;
     cfl->GetValue("param-stddev", &param_stddev);
     cfl->GetValue("bias-stddev", &bias_stddev);
-    Init(input_x_dim, input_y_dim, input_z_dim,
+    Init(is_updatable, input_x_dim, input_y_dim, input_z_dim,
          filt_x_dim, filt_y_dim, filt_x_step, filt_y_step, num_filters,
          input_vectorization, param_stddev, bias_stddev);
   }
@@ -3194,7 +3241,8 @@ void ConvolutionComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
       patch_batch.push_back(new CuSubMatrix<BaseFloat>(
               patches.ColRange(patch_number * filter_dim, filter_dim)));
       filter_params_batch.push_back(filter_params_elem);
-      tgt_batch[patch_number]->AddVecToRows(1.0, bias_params_, 1.0); // add bias
+      if (has_bias_)
+        tgt_batch[patch_number]->AddVecToRows(1.0, bias_params_, 1.0); // add bias
     }
   }
   // apply all filters
@@ -3211,17 +3259,21 @@ void ConvolutionComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
 
 // scale the parameters
 void ConvolutionComponent::Scale(BaseFloat scale) {
-  filter_params_.Scale(scale);
-  bias_params_.Scale(scale);
+  if (IsUpdatable())  {
+    filter_params_.Scale(scale);
+    bias_params_.Scale(scale);
+  }
 }
 
 // add another convolution component
 void ConvolutionComponent::Add(BaseFloat alpha, const Component &other_in) {
-  const ConvolutionComponent *other =
-      dynamic_cast<const ConvolutionComponent*>(&other_in);
-  KALDI_ASSERT(other != NULL);
-  filter_params_.AddMat(alpha, other->filter_params_);
-  bias_params_.AddVec(alpha, other->bias_params_);
+  if (IsUpdatable())  {
+    const ConvolutionComponent *other =
+        dynamic_cast<const ConvolutionComponent*>(&other_in);
+    KALDI_ASSERT(other != NULL);
+    filter_params_.AddMat(alpha, other->filter_params_);
+    bias_params_.AddVec(alpha, other->bias_params_);
+  }
 }
 
 /*
@@ -3363,7 +3415,7 @@ void ConvolutionComponent::Backprop(const std::string &debug_info,
     InderivPatchesToInderiv(in_deriv_patches, in_deriv);
   }
 
-  if (to_update != NULL)  {
+  if ((to_update != NULL) && IsUpdatable())  {
     to_update->Update(debug_info, in_value, out_deriv, out_deriv_batch);
   }
 
@@ -3487,6 +3539,10 @@ void ConvolutionComponent::Read(std::istream &is, bool binary) {
   filter_params_.Read(is, binary);
   ExpectToken(is, binary, "<BiasParams>");
   bias_params_.Read(is, binary);
+  ExpectToken(is, binary, "<IsUpdatable>");
+  ReadBasicType(is, binary, &is_updatable_);
+  ExpectToken(is, binary, "<HasBias>");
+  ReadBasicType(is, binary, &has_bias_);
   std::string tok;
   ReadToken(is, binary, &tok);
   if (tok == "<IsGradient>") {
@@ -3520,6 +3576,10 @@ void ConvolutionComponent::Write(std::ostream &os, bool binary) const {
   filter_params_.Write(os, binary);
   WriteToken(os, binary, "<BiasParams>");
   bias_params_.Write(os, binary);
+  WriteToken(os, binary, "<IsUpdatable>");
+  WriteBasicType(os, binary, is_updatable_);
+  WriteToken(os, binary, "<HasBias>");
+  WriteBasicType(os, binary, has_bias_);
   WriteToken(os, binary, "<IsGradient>");
   WriteBasicType(os, binary, is_gradient_);
   WriteToken(os, binary, "</ConvolutionComponent>");
@@ -3555,7 +3615,9 @@ void ConvolutionComponent::SetParams(const VectorBase<BaseFloat> &bias,
 }
 
 int32 ConvolutionComponent::NumParameters() const {
-  return (filter_params_.NumCols() + 1) * filter_params_.NumRows();
+  if (IsUpdatable())
+    return (filter_params_.NumCols() + 1) * filter_params_.NumRows();
+  return 0;
 }
 
 void ConvolutionComponent::Vectorize(VectorBase<BaseFloat> *params) const {
@@ -3584,8 +3646,8 @@ Convolutional1dComponent::Convolutional1dComponent(const Convolutional1dComponen
 Convolutional1dComponent::Convolutional1dComponent(const CuMatrixBase<BaseFloat> &filter_params,
                                                    const CuVectorBase<BaseFloat> &bias_params,
                                                    BaseFloat learning_rate):
-    filter_params_(filter_params),
-    bias_params_(bias_params) {
+  filter_params_(filter_params),
+  bias_params_(bias_params) {
   SetLearningRate(learning_rate);
   KALDI_ASSERT(filter_params.NumRows() == bias_params.Dim() &&
                bias_params.Dim() != 0);
@@ -3631,7 +3693,9 @@ void Convolutional1dComponent::Init(int32 input_dim, int32 output_dim,
 }
 
 // initialize the component using predefined matrix file
-void Convolutional1dComponent::Init(int32 patch_dim, int32 patch_step, int32 patch_stride,
+void Convolutional1dComponent::Init(int32 input_dim, int32 output_dim,
+                                    int32 patch_dim, int32 patch_step,
+                                    int32 patch_stride,
                                     std::string matrix_filename) {
   patch_dim_ = patch_dim;
   patch_step_ = patch_step;
@@ -3640,6 +3704,12 @@ void Convolutional1dComponent::Init(int32 patch_dim, int32 patch_step, int32 pat
   ReadKaldiObject(matrix_filename, &mat);
   KALDI_ASSERT(mat.NumCols() >= 2);
   int32 filter_dim = mat.NumCols() - 1, num_filters = mat.NumRows();
+  int32 num_patches = 1 + (patch_stride - patch_dim) / patch_step;
+  KALDI_ASSERT(num_filters == output_dim / num_patches);
+  KALDI_ASSERT(input_dim % patch_stride == 0);
+  KALDI_ASSERT((patch_stride - patch_dim) % patch_step == 0);
+  KALDI_ASSERT(output_dim % num_patches == 0);
+
   filter_params_.Resize(num_filters, filter_dim);
   bias_params_.Resize(num_filters);
   filter_params_.CopyFromMat(mat.Range(0, num_filters, 0, filter_dim));
@@ -3691,9 +3761,11 @@ void Convolutional1dComponent::InitFromConfig(ConfigLine *cfl) {
   ok = ok && cfl->GetValue("patch-dim", &patch_dim);
   ok = ok && cfl->GetValue("patch-step", &patch_step);
   ok = ok && cfl->GetValue("patch-stride", &patch_stride);
+  ok = ok && cfl->GetValue("input-dim", &input_dim);
+  ok = ok && cfl->GetValue("output-dim", &output_dim);
   if (cfl->GetValue("matrix", &matrix_filename)) {
     // initialize from prefined parameter matrix
-    Init(patch_dim, patch_step, patch_stride, matrix_filename);
+    Init(input_dim, output_dim, patch_dim, patch_step, patch_stride, matrix_filename);
     if (cfl->GetValue("input-dim", &input_dim))
       KALDI_ASSERT(input_dim == InputDim() &&
                "input-dim mismatch vs. matrix.");
@@ -3701,8 +3773,6 @@ void Convolutional1dComponent::InitFromConfig(ConfigLine *cfl) {
       KALDI_ASSERT(output_dim == OutputDim() &&
                "output-dim mismatch vs. matrix.");
   } else {
-    ok = ok && cfl->GetValue("input-dim", &input_dim);
-    ok = ok && cfl->GetValue("output-dim", &output_dim);
     // initialize from configuration
     BaseFloat param_stddev = 1.0 / std::sqrt(input_dim), bias_stddev = 1.0;
     cfl->GetValue("param-stddev", &param_stddev);
@@ -3923,8 +3993,8 @@ void Convolutional1dComponent::Backprop(const std::string &debug_info,
 				    p * num_filters, num_filters)));
     filter_params_batch.push_back(filter_params_elem);
   }
-  AddMatMatBatched<BaseFloat>(1.0, patch_deriv_batch, out_deriv_batch, kNoTrans,
-                              filter_params_batch, kNoTrans, 0.0);
+  AddMatMatBatched(1.0f, patch_deriv_batch, out_deriv_batch, kNoTrans,
+		  filter_params_batch, kNoTrans, 0.0f);
 
   // release memory
   delete filter_params_elem;

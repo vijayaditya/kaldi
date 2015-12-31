@@ -672,21 +672,6 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
     return false;
   supervision->fst = composed_fst;
 
-  {
-    fst::DeterminizeOptions<fst::StdArc> opts;
-    opts.state_threshold = max_states;
-    fst::Determinize(composed_fst, &(supervision->fst), opts);
-    // the - 1 here is just because I'm not sure if it stops just before the
-    // threshold.
-    if (supervision->fst.NumStates() >= opts.state_threshold - 1) {
-      KALDI_WARN << "Determinization stopped early after reaching "
-                 << supervision->fst.NumStates() << " states.  Likely "
-                 << "this utterance has a very strange transcription.";
-      return false;
-    }
-  }
-  fst::Minimize(&(supervision->fst));
->>>>>>> chain branch: fix to bug found in latest commit (RE determinization max-states) by Xiang Li
   // Make sure the states are numbered in increasing order of time.
   SortBreadthFirstSearch(&(supervision->fst));
   KALDI_ASSERT(supervision->fst.Properties(fst::kAcceptor, true) == fst::kAcceptor);

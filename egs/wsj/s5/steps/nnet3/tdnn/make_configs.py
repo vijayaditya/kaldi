@@ -138,6 +138,10 @@ if __name__ == "__main__":
                         help="iVector dimension, e.g. 100", default=0)
     parser.add_argument("--include-log-softmax", type=str,
                         help="add the final softmax layer ", default="true", choices = ["false", "true"])
+    parser.add_argument("--xent-regularize", type=float,
+                        help="For chain models, if nonzero, add a separate output for cross-entropy "
+                        "regularization (with learning-rate-factor equal to the inverse of this)",
+                        default=0.0)
     parser.add_argument("--final-layer-normalize-target", type=float,
                         help="RMS target for final layer (set to <1 if final layer learns too fast",
                         default=1.0)
@@ -301,6 +305,13 @@ if __name__ == "__main__":
                            use_presoftmax_prior_scale = use_presoftmax_prior_scale,
                            prior_scale_file = prior_scale_file,
                            include_log_softmax = True if args.include_log_softmax == "true" else False)
+
+        if args.xent_regularize != 0.0:
+            nodes.AddFinalLayer(config_lines, prev_layer_output, args.num_targets,
+                                use_presoftmax_prior_scale = use_presoftmax_prior_scale,
+                                prior_scale_file = prior_scale_file,
+                                include_log_softmax = True,
+                                name_affix = 'xent')
 
         config_files['{0}/layer{1}.config'.format(args.config_dir, i+1)] = config_lines
         config_lines = {'components':[], 'component-nodes':[]}

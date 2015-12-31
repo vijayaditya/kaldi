@@ -144,7 +144,6 @@ bool Component::IsComputable(const MiscComputationInfo &misc_info,
   return true;
 }
 
-
 void UpdatableComponent::InitLearningRatesFromConfig(ConfigLine *cfl) {
   cfl->GetValue("learning-rate", &learning_rate_);
   cfl->GetValue("learning-rate-factor", &learning_rate_factor_);
@@ -201,7 +200,6 @@ void UpdatableComponent::WriteUpdatableCommon(std::ostream &os,
   WriteBasicType(os, binary, learning_rate_);
 }
 
-
 std::string UpdatableComponent::Info() const {
   std::stringstream stream;
   stream << Type() << ", input-dim=" << InputDim()
@@ -211,6 +209,8 @@ std::string UpdatableComponent::Info() const {
     stream << ", is-gradient=true";
   if (learning_rate_factor_ != 1.0)
     stream << ", learning-rate-factor=" << learning_rate_factor_;
+  if (!is_updatable_)
+    stream << ", is_updatable=false";
   return stream.str();
 }
 
@@ -265,7 +265,7 @@ std::string NonlinearComponent::Info() const {
     Vector<BaseFloat> deriv_avg(deriv_avg_dbl);
     deriv_avg.Scale(1.0 / count_);
     stream << ", deriv-avg=" << SummarizeVector(deriv_avg);
-  }
+  } 
   return stream.str();
 }
 

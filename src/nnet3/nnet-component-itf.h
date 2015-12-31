@@ -347,7 +347,8 @@ class UpdatableComponent: public Component {
   UpdatableComponent(const UpdatableComponent &other):
       learning_rate_(other.learning_rate_),
       learning_rate_factor_(other.learning_rate_factor_),
-      is_gradient_(other.is_gradient_) { }
+      is_gradient_(other.is_gradient_),
+      is_updatable_(other.is_updatable_) { }
 
   /// \brief Sets parameters to zero, and if treat_as_gradient is true,
   ///  sets is_gradient_ to true and sets learning_rate_ to 1, ignoring
@@ -355,7 +356,7 @@ class UpdatableComponent: public Component {
   virtual void SetZero(bool treat_as_gradient) = 0;
 
   UpdatableComponent(): learning_rate_(0.001), learning_rate_factor_(1.0),
-                        is_gradient_(false) { }
+                        is_gradient_(false), is_updatable_(false) { }
 
   virtual ~UpdatableComponent() { }
 
@@ -371,11 +372,17 @@ class UpdatableComponent: public Component {
   virtual void SetLearningRate(BaseFloat lrate) {
     learning_rate_ = lrate * learning_rate_factor_;
   }
-
   /// Gets the learning rate of gradient descent.  Note: if you call
   /// SetLearningRate(x), and learning_rate_factor_ != 1.0,
   /// a different value than x will returned.
   BaseFloat LearningRate() const { return learning_rate_; }
+
+
+  void SetUpdatableStatus(bool is_updatable) {
+    is_updatable_ = is_updatable;
+  }
+  /// Gets the updatable status of the component
+  bool IsUpdatable() const { return is_updatable_; }
 
   virtual std::string Info() const;
 
@@ -415,7 +422,8 @@ class UpdatableComponent: public Component {
                       ///< than as parameters.  Its main effect is that we disable
                       ///< any natural-gradient update and just compute the standard
                       ///< gradient.
-
+  bool is_updatable_; ///< If true this component gets model updates, if false
+                      ///< it is treated as a non-updatable component
  private:
   const UpdatableComponent &operator = (const UpdatableComponent &other); // Disallow.
 };

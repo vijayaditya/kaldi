@@ -180,26 +180,47 @@ def AddSoftmaxLayer(config_lines, name, input):
             'dimension': input['dimension']}
 
 
-def AddOutputLayer(config_lines, input, label_delay=None):
+def AddOutputLayer(config_lines, input, label_delay=None, suffix=None):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
-    if label_delay is None:
-        component_nodes.append('output-node name=output input={0}'.format(input['descriptor']))
-    else:
-        component_nodes.append('output-node name=output input=Offset({0},{1})'.format(input['descriptor'], label_delay))
+    name = 'output'
+    if suffix is not None:
+        name = '{0}-{1}'.format(name, suffix)
 
-def AddFinalLayer(config_lines, input, output_dim, ng_affine_options = " param-stddev=0 bias-stddev=0 ", label_delay=None, use_presoftmax_prior_scale = False, prior_scale_file = None, include_log_softmax = True):
+    if label_delay is None:
+        component_nodes.append('output-node name={0} input={1}'.format(name, input['descriptor']))
+    else:
+        component_nodes.append('output-node name={0} input=Offset({1},{2})'.format(name, input['descriptor'], label_delay))
+
+def AddFinalLayer(config_lines, input, output_dim,
+        ng_affine_options = " param-stddev=0 bias-stddev=0 ",
+        label_delay=None,
+        use_presoftmax_prior_scale = False,
+        prior_scale_file = None,
+        include_log_softmax = True,
+        name_affix = None):
+
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
     
-    prev_layer_output = AddAffineLayer(config_lines, "Final", input, output_dim, ng_affine_options)
+    if name_affix is not None:
+        final_node_prefix = 'Final-' + str(name_affix)
+    else:
+        final_node_prefix = 'Final'
+
+    prev_layer_output = AddAffineLayer(config_lines,
+            final_node_prefix , input, output_dim,
+            ng_affine_options)
     if include_log_softmax:
         if use_presoftmax_prior_scale :
-            components.append('component name=Final-fixed-scale type=FixedScaleComponent scales={0}'.format(prior_scale_file))
-            component_nodes.append('component-node name=Final-fixed-scale component=Final-fixed-scale input={0}'.format(prev_layer_output['descriptor']))
-            prev_layer_output['descriptor'] = "Final-fixed-scale"
-        prev_layer_output = AddSoftmaxLayer(config_lines, "Final", prev_layer_output)
-    AddOutputLayer(config_lines, prev_layer_output, label_delay)
+            components.append('component name={0}-fixed-scale type=FixedScaleComponent scales={1}'.format(final_node_prefix, prior_scale_file))
+            component_nodes.append('component-node name=Final-fixed-scale component={0}-fixed-scale input={1}'.format(finale_node_prefix,
+                prev_layer_output['descriptor']))
+            prev_layer_output['descriptor'] = "{0}-fixed-scale".format(final_node_prefix)
+        prev_layer_output = AddSoftmaxLayer(config_lines, final_node_prefix, prev_layer_output)
+    # we use the same name_affix as a prefix in for affine/scale nodes but as a
+    # suffix for output node
+    AddOutputLayer(config_lines, prev_layer_output, label_delay, suffix = name_affix)
 
 def AddLstmLayer(config_lines,
                  name, input, cell_dim,
@@ -330,6 +351,247 @@ def AddLstmLayer(config_lines,
             'descriptor': output_descriptor,
             'dimension':output_dim
             }
+
+# lowpass filters used to reduce the rate of the signal to specified rates
+filter_cache = {}
+
+# function assumes that most of the input/parameter checks have already been performed
+# using a commong convolution component for a all lp filters followed by
+# dim-range node is very costly !!
+def AddCwrnnLayer(config_lines,
+                 name, input,
+                 lpfilt_filename,
+                 num_lpfilter_taps = None,
+                 input_vectorization = 'zyx',
+                 clipping_threshold = 1.0,
+                 norm_based_clipping = "false",
+                 ng_per_element_scale_options = "",
+                 ratewise_params = {'T1': {'rate':1, 'dim':128},
+                                    'T2': {'rate':1.0/2, 'dim':128},
+                                    'T3': {'rate':1.0/4, 'dim':128},
+                                    'T4': {'rate':1.0/8, 'dim':128}
+                                    },
+                 nonlinearity = "SigmoidComponent",
+                 subsample = True,
+                 filter_input_step = 1,
+                 diag_init_scaling_factor = 0,
+                 input_type = "smooth",
+                 use_lstm = False,
+                 projection_dim = 0# not used anymore
+                 ):
+    assert(filter_input_step > 0)
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+
+    key_rate_pairs = map(lambda key: (key, ratewise_params[key]['rate']), ratewise_params)
+    key_rate_pairs.sort(key=itemgetter(1))
+    keys = map(lambda x: x[0], key_rate_pairs)
+    largest_time_period = int(1.0/ratewise_params[keys[0]]['rate'])
+
+    max_num_lpfilter_taps = 0 # this will used by calling function to determine
+    # input context of the CWRNN node
+    # since we want to subsample the input feature representation
+    # we will pass it through a low pass filters one for each rate
+    slow_to_fast_descriptors = {}
+    for key in keys:
+        slow_to_fast_descriptors[key] = {}
+
+    for key_index in xrange(len(keys)):
+        key = keys[key_index]
+        params = ratewise_params[key]
+        rate = params['rate']
+        time_period = int(round(1.0/params['rate']))
+        cw_unit_input_descriptor = None
+        if rate != 1 and input_type == "smooth":
+            # we will downsample the input to this rate unit
+            # so we will low pass filter the input to avoid aliasing
+            num_lpfilter_taps = 2 * time_period + 1
+            max_num_lpfilter_taps = max(num_lpfilter_taps, max_num_lpfilter_taps)
+            if has_scipy_signal:
+                # python implementation says nyq is nyquist frequency, but I think
+                # they are using it as half the sampling rate
+                # [partially confirmed based on function output comparison with matlab]
+                lp_filter = signal.firwin(num_lpfilter_taps, rate, width=None, window='hamming', pass_zero=True, scale=True, nyq=1.0)
+                # add a zero for the bias element expected by the
+                # Convolution1dComponent
+            elif filter_cache.has_key(rate):
+                # as all users might not have scipy installed we are providing a
+                # set of filters at the specified rates and tap lengths
+                raise NotImplementedError("Low priority as this code block is just for compatibility with python installations without scipy")
+            cur_lpfilt_filename = '{0}_{1}'.format(lpfilt_filename, key)
+            filter_context = int((num_lpfilter_taps - 1) / 2)
+            filter_input_splice_indexes = range(-1 * filter_context, filter_context + 1, filter_input_step)
+            filter_vector_indexes = map(lambda x: x - min(filter_input_splice_indexes), filter_input_splice_indexes)
+            lp_filter = lp_filter[filter_vector_indexes]
+            lp_filter = np.append(lp_filter, 0)
+            WriteKaldiMatrix(np.array([lp_filter]), cur_lpfilt_filename)
+            input_dim = input['dimension']
+            #TODO : perform a check to see if the input descriptors allow use of offset and append
+            list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
+            filter_input_descriptor = 'Append({0})'.format(' , '.join(list))
+            filter_input_descriptor = {'descriptor':filter_input_descriptor,
+                                    'dimension':len(filter_input_splice_indexes) * input_dim}
+
+            input_x_dim = len(filter_input_splice_indexes)
+            input_y_dim = input['dimension']
+            input_z_dim = 1
+            filt_x_dim = len(filter_input_splice_indexes)
+            filt_y_dim = 1
+            filt_x_step = 1
+            filt_y_step = 1
+
+            cw_unit_input_descriptor = AddConvolutionLayer(config_lines, '{0}_{1}'.format(name, key), filter_input_descriptor,
+                                                          input_x_dim, input_y_dim, input_z_dim,
+                                                          filt_x_dim, filt_y_dim,
+                                                          filt_x_step, filt_y_step,
+                                                          1, input_vectorization,
+                                                          filter_bias_file = cur_lpfilt_filename,
+                                                          is_updatable = False)
+
+        else:
+            cw_unit_input_descriptor = input
+
+        fastrate_params = {}
+        for fast_key_index in range(key_index+1, len(keys)):
+            fast_key = keys[fast_key_index]
+            fastrate_params[fast_key] = ratewise_params[fast_key]
+        if use_lstm:
+            [output_descriptor, fastrate_output_descriptors] = AddCwlstmRateUnit(config_lines, '{0}_{1}'.format(name, key),
+                                                                                 cw_unit_input_descriptor, params['cell-dim'],
+                                                                                 params['rate'], params['recurrent-projection'],
+                                                                                 params['non-recurrent-projection'],
+                                                                                 clipping_threshold = clipping_threshold,
+                                                                                 norm_based_clipping = norm_based_clipping,
+                                                                                 ng_per_element_scale_options = ng_per_element_scale_options,
+                                                                                 lstm_delay = -1 * time_period,
+                                                                                 slowrate_descriptors = slow_to_fast_descriptors[key],
+                                                                                 fastrate_params = fastrate_params,
+                                                                                 subsample = subsample,
+                                                                                 input_type = input_type)
+            for fastrate in fastrate_output_descriptors.keys():
+                for dest_name in fastrate_output_descriptors[fastrate].keys():
+                    try:
+                        slow_to_fast_descriptors[fastrate][dest_name][key] = fastrate_output_descriptors[fastrate][dest_name]
+                    except KeyError:
+                        slow_to_fast_descriptors[fastrate][dest_name] = {}
+                        slow_to_fast_descriptors[fastrate][dest_name][key] = fastrate_output_descriptors[fastrate][dest_name]
+
+        else:
+            [output_descriptor, fastrate_output_descriptors] = AddCwrnnRateUnit(config_lines, '{0}_{1}'.format(name, key),
+                                                                                cw_unit_input_descriptor, params['dim'],
+                                                                                params['rate'],
+                                                                                clipping_threshold = clipping_threshold,
+                                                                                norm_based_clipping = norm_based_clipping,
+                                                                                delay = -1 * time_period,
+                                                                                slowrate_descriptors = slow_to_fast_descriptors[key],
+                                                                                fastrate_params = fastrate_params,
+                                                                                nonlinearity = nonlinearity,
+                                                                                subsample = subsample,
+                                                                                diag_init_scaling_factor = diag_init_scaling_factor,
+                                                                                input_type = input_type)
+            for fastrate in fastrate_output_descriptors.keys():
+                slow_to_fast_descriptors[fastrate][key] = fastrate_output_descriptors[fastrate]
+    return [output_descriptor, max_num_lpfilter_taps, largest_time_period]
+
+
+
+def AddCwrnnRateUnit(config_lines,
+                    name, input, output_dim,
+                    unit_rate,
+                    clipping_threshold = 1.0,
+                    norm_based_clipping = "false",
+                    ng_affine_options = " bias-stddev=0 ",
+                    delay = -1,
+                    slowrate_descriptors = {},
+                    fastrate_params = {},
+                    nonlinearity = "SigmoidComponent",
+                    subsample = True,
+                    diag_init_scaling_factor = 0,
+                    input_type = "smooth"):
+
+    # if true, use subsampling for the slower rates
+    # else always use delay of -1.
+    if not subsample:
+        delay = -1
+
+    if nonlinearity == "RectifiedLinearComponent+NormalizeComponent":
+        raise Exception("{0} is not yet supported".format(nonlinearity))
+    if diag_init_scaling_factor != 0:
+        recurrent_ng_affine_options = " diag-init-scaling-factor={0}".format(diag_init_scaling_factor)
+        nonrecurrent_ng_affine_options = "{0} param-stddev={1}".format(ng_affine_options, diag_init_scaling_factor)
+    else:
+        recurrent_ng_affine_options = ng_affine_options
+        nonrecurrent_ng_affine_options = ng_affine_options
+
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+    print(input)
+    input_descriptor = input['descriptor']
+    input_dim = input['dimension']
+    name = name.strip()
+
+    recurrent_connection = "r_t"
+    if len(slowrate_descriptors.keys()) > 0:
+        slowrate_sum_descriptor = GetSumDescriptor(map(lambda x: x['descriptor'], slowrate_descriptors.values()))[0]
+    else:
+        slowrate_sum_descriptor = ''
+
+    unit_time_period = int(1.0 / unit_rate)
+
+    if input_type in set(["stack", "sum"]):
+        splice_indexes = range(-1*(unit_time_period-1), 1)
+
+        list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in splice_indexes]
+        if input_type == "stack":
+            input_descriptor = 'Append({0})'.format(' , '.join(list))
+            input_dim = len(splice_indexes) * input_dim
+        elif input_type == "sum":
+            input_descriptor = GetSumDescriptor(list)[0]
+    else:
+        input_descriptor = input['descriptor']
+
+    # Parameter Definitions W*(* replaced by - to have valid names)
+    components.append("# Current rate components : Wxr")
+    total_fastrate_unit_dim = sum(map(lambda x: x['dim'], fastrate_params.values()))
+    components.append("component name={0}_W_r type=NaturalGradientAffineComponent input-dim={1} output-dim={2} rank-in={3} rank-out={4} {5}".format(name, output_dim, output_dim + total_fastrate_unit_dim, int(output_dim * 0.1), int((output_dim + total_fastrate_unit_dim) * 0.1), recurrent_ng_affine_options))
+    components.append("component name={0}_W_x type=NaturalGradientAffineComponent input-dim={1} output-dim={2} rank-in={3} rank-out={4} {5}".format(name, input_dim, output_dim, int(input_dim * 0.1), int(output_dim * 0.1), nonrecurrent_ng_affine_options))
+    component_nodes.append("component-node name={0}_W_x_t component={0}_W_x input={1}".format(name, input_descriptor))
+
+    components.append("component name={0}_nonlin type={1} dim={2}".format(name, nonlinearity, output_dim))
+    components.append("component name={0}_clip type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} ".format(name, output_dim, clipping_threshold, norm_based_clipping))
+    if slowrate_sum_descriptor == '':
+        component_nodes.append("component-node name={0}_{1}_preclip component={0}_nonlin input=Sum({0}_W_r_t, {0}_W_x_t)".format(name, recurrent_connection))
+    else:
+        component_nodes.append("component-node name={0}_{1}_preclip component={0}_nonlin input=Sum(Sum({0}_W_r_t, {0}_W_x_t), {2})".format(name, recurrent_connection, slowrate_sum_descriptor))
+    component_nodes.append("component-node name={0}_{1} component={0}_clip input={0}_{1}_preclip".format(name, recurrent_connection))
+
+
+    fastrate_output_descriptors = {}
+    keys = fastrate_params.keys()
+    if total_fastrate_unit_dim == 0:
+        component_nodes.append("component-node name={0}_W_r_t component={0}_W_r input=IfDefined(Offset({0}_{1}, {2}))".format(name, recurrent_connection, delay))
+    else:
+        component_nodes.append("component-node name={0}_W_r_all_t component={0}_W_r input=IfDefined(Offset({0}_{1}, {2}))".format(name, recurrent_connection, delay))
+        component_nodes.append("dim-range-node name={0}_W_r_t input-node={0}_W_r_all_t dim-offset=0 dim={1}".format(name, output_dim))
+        offset = output_dim
+        for key in fastrate_params.keys():
+            params = fastrate_params[key]
+            fastrate_time_period = int(1.0/params['rate'])
+            output_name = '{0}_W_rfast-tmod{1}_t'.format(name, fastrate_time_period)
+            component_nodes.append("dim-range-node name={1} input-node={0}_W_r_all_t dim-offset={2} dim={3}".format(name, output_name, offset, params['dim']))
+            offset += params['dim']
+            if subsample:
+                fastrate_descriptor = 'Round({0}, {1})'.format(output_name, unit_time_period)
+            else:
+                fastrate_descriptor = output_name
+            fastrate_output_descriptors[key] = {'descriptor': fastrate_descriptor,
+                                                'dimension' : params['dim']}
+
+    output_descriptor = "{0}_{1}".format(name, recurrent_connection)
+    return [{'descriptor': output_descriptor, 'dimension':output_dim}, fastrate_output_descriptors]
+
+
+
 
 def AddClstmLayer(config_lines,
                  name, input, cell_dim,
