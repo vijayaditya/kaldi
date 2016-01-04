@@ -475,7 +475,7 @@ while [ $x -lt $num_iters ]; do
         k=$[$num_archives_processed + $n - 1]; # k is a zero-based index that we'll derive
                                                # the other indexes from.
         archive=$[($k%$num_archives)+1]; # work out the 1-based archive index.
-        frame_shift=$[($k/$num_archives)%$frame_subsampling_factor];
+        frame_shift=$[($archive + $k/$num_archives)%$frame_subsampling_factor];
 
         if $scale_max_param_change; then
           this_max_param_change=$(perl -e "print ($max_param_change * $this_num_jobs);")
