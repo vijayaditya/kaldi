@@ -639,8 +639,8 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
     // So use pruning to stop a potential out-of-memory condition.
     fst::DeterminizeOptions<fst::StdArc> opts;
     // two million states is way more than we expect in any normal situation.
-    opts.state_threshold = 2000000; 
-    fst::Determinize(composed_fst, &(supervision->fst));
+    opts.state_threshold = 2000000;
+    fst::Determinize(composed_fst, &(supervision->fst), opts);
     // the - 1 here is just because I'm not sure if it stops just before the
     // threshold.
     if (supervision->fst.NumStates() >= opts.state_threshold - 1) {
