@@ -672,6 +672,25 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
     return false;
   supervision->fst = composed_fst;
 
+  {
+    // It's possible in principle for very strange transcripts (e.g. long transcripts with
+    // many pronunciations) for determinization to blow up, and we've seen this in practice.
+    // So use pruning to stop a potential out-of-memory condition.
+    fst::DeterminizeOptions<fst::StdArc> opts;
+    // two million states is way more than we expect in any normal situation.
+    opts.state_threshold = 2000000;
+    fst::Determinize(composed_fst, &(supervision->fst), opts);
+    // the - 1 here is just because I'm not sure if it stops just before the
+    // threshold.
+    if (supervision->fst.NumStates() >= opts.state_threshold - 1) {
+      KALDI_WARN << "Determinization stopped early after reaching "
+                 << supervision->fst.NumStates() << " states.  Likely "
+                 << "this utterance has a very strange transcription.";
+      return false;
+    }
+  }
+  fst::Minimize(&(supervision->fst));
+>>>>>>> chain branch: fix to bug found in latest commit (RE determinization max-states) by Xiang Li
   // Make sure the states are numbered in increasing order of time.
   SortBreadthFirstSearch(&(supervision->fst));
   KALDI_ASSERT(supervision->fst.Properties(fst::kAcceptor, true) == fst::kAcceptor);
