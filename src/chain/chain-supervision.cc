@@ -620,7 +620,17 @@ void AppendSupervision(const std::vector<const Supervision*> &input,
 
 bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
                                Supervision *supervision) {
-  // remove epsilons before componing.  'normalization_fst' has noepsilons so
+  // It's possible in principle for very strange transcripts (e.g. long
+  // transcripts with many pronunciations) for the FSTs to blow up, and
+  // we've seen this in practice.  So use pruning to stop a potential
+  // out-of-memory condition.
+  int32 max_states = 200000;
+  if (supervision->fst.NumStates() >= max_states) {
+    KALDI_WARN << "Rejecting utterance because supervision FST has too many "
+               << "states " << supervision->fst.NumStates();
+    return false;
+  }
+  // remove epsilons before composing.  'normalization_fst' has noepsilons so
   // the composed result will be epsilon free.
   fst::StdVectorFst supervision_fst_noeps(supervision->fst);
   fst::RmEpsilon(&supervision_fst_noeps);
@@ -634,12 +644,8 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
   // determinize and minimize to make it as compact as possible.
 
   {
-    // It's possible in principle for very strange transcripts (e.g. long transcripts with
-    // many pronunciations) for determinization to blow up, and we've seen this in practice.
-    // So use pruning to stop a potential out-of-memory condition.
     fst::DeterminizeOptions<fst::StdArc> opts;
-    // two million states is way more than we expect in any normal situation.
-    opts.state_threshold = 2000000;
+    opts.state_threshold = max_states;
     fst::Determinize(composed_fst, &(supervision->fst), opts);
     // the - 1 here is just because I'm not sure if it stops just before the
     // threshold.
