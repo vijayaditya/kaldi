@@ -673,12 +673,8 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
   supervision->fst = composed_fst;
 
   {
-    // It's possible in principle for very strange transcripts (e.g. long transcripts with
-    // many pronunciations) for determinization to blow up, and we've seen this in practice.
-    // So use pruning to stop a potential out-of-memory condition.
     fst::DeterminizeOptions<fst::StdArc> opts;
-    // two million states is way more than we expect in any normal situation.
-    opts.state_threshold = 2000000;
+    opts.state_threshold = max_states;
     fst::Determinize(composed_fst, &(supervision->fst), opts);
     // the - 1 here is just because I'm not sure if it stops just before the
     // threshold.
