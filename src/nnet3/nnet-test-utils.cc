@@ -1100,6 +1100,20 @@ static void GenerateRandomComponentConfig(std::string *component_type,
          << " num-repeats=" << num_repeats;
       break;
     }
+    case 28: {
+      *component_type = "TensorMultiplyComponent";
+      int32 input_num_groups = 10 + Rand() % 20,
+            output_num_groups = 10 + Rand() % 20,
+            group_size = 3 + Rand() % 10;
+
+      os << "input-num-groups=" << input_num_groups
+         << " output-num-groups=" << output_num_groups
+         << " group-size=" << group_size;
+      break;
+      // TODO : add test for file based initialization. But confirm how to write
+      // a file which is not going to be overwritten by other components
+    }
+
     default:
       KALDI_ERR << "Error generating random component";
   }

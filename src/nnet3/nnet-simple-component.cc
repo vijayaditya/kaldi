@@ -4836,6 +4836,248 @@ void CompositeComponent::InitFromConfig(ConfigLine *cfl) {
 }
 
 
+void TensorMultiplyComponent::Init(int32 group_size, int32 input_num_groups,
+                                   int32 output_num_groups,
+                                   BaseFloat param_stddev)  {
+  params_.Resize(group_size, input_num_groups * output_num_groups, kSetZero);
+  output_num_groups_ = output_num_groups;
+  input_num_groups_ = input_num_groups;
+  group_size_ = group_size;
+
+  KALDI_ASSERT(output_num_groups > 0 &&
+               input_num_groups > 0 &&
+               group_size > 0 &&
+               param_stddev >= 0.0);
+  params_.SetRandn();
+  params_.Scale(param_stddev);
+}
+
+void TensorMultiplyComponent::Init(int32 group_size, int32 input_num_groups,
+                                   int32 output_num_groups,
+                                   CuMatrix<BaseFloat>& init_params,
+                                   bool same_block 
+                                   // if same_block is true : 
+                                   //   init_params is the block used to
+                                   //   initialize all the rows params_
+                                   // else if same_block is false:
+                                   //   init_params is the block affine matrix
+                                   //   stored in Tensor3D format 
+                                   //   used by params_
+                                   )  {
+  params_.Resize(group_size, input_num_groups * output_num_groups, kSetZero);
+  output_num_groups_ = output_num_groups;
+  input_num_groups_ = input_num_groups;
+  group_size_ = group_size;
+  KALDI_ASSERT(output_num_groups > 0 &&
+               input_num_groups > 0 &&
+               group_size > 0);
+
+  if (same_block) {
+    KALDI_ASSERT(init_params.NumRows() == output_num_groups &&
+                 init_params.NumCols() == input_num_groups);
+
+    // vectorize init_params in row major format and copy this vector into all the
+    // rows of the params_ matrix. Check nnet-component.h to understand the
+    // structure of the params_ matrix.
+    CuVector<BaseFloat> params_row;
+    params_row.Resize(input_num_groups * output_num_groups);
+    for (size_t i = 0; i < output_num_groups; i++)  {
+      for (size_t j = 0; j < input_num_groups; j++) {
+        params_row(i * input_num_groups + j) = init_params(i, j);
+      }
+    }
+    params_.AddVecToRows(1.0, params_row, 0.0);
+  } else  {
+    KALDI_ASSERT(init_params.NumRows() == group_size  &&
+                 init_params.NumCols() == input_num_groups * output_num_groups);
+    params_.AddMat(1.0, init_params);
+
+  }
+}
+
+std::string TensorMultiplyComponent::Info() const {
+  std::ostringstream stream;
+  stream << UpdatableComponent::Info()
+         << ", input-dim=" << InputDim()
+         << ", output-dim=" << OutputDim()
+         << ", input-num-groups=" << input_num_groups_
+         << ", output-num-groups=" << output_num_groups_
+         << ", group-size=" << group_size_;
+  PrintParameterStats(stream, "params", params_);
+  return stream.str();
+}
+
+void TensorMultiplyComponent::InitFromConfig(ConfigLine *cfl) {
+  bool ok = true;
+  std::string init_params_file;
+  int32 group_size = 0;
+  int32 input_num_groups = 0;
+  int32 output_num_groups = 0;
+  
+  CuMatrix<BaseFloat> init_params;
+  ok = ok && cfl->GetValue("input-num-groups", &input_num_groups);
+  ok = ok && cfl->GetValue("output-num-groups", &output_num_groups);
+  ok = ok && cfl->GetValue("group-size", &group_size);
+  BaseFloat param_stddev = 1.0 / std::sqrt(input_num_groups);
+  cfl->GetValue("param-stddev", &param_stddev);
+  if (cfl->GetValue("init-params-block-file", &init_params_file))  {
+    ReadKaldiObject(init_params_file, &init_params);  // will abort on failure.
+    Init(group_size, input_num_groups,
+         output_num_groups, init_params, true);
+  } else if (cfl->GetValue("init-params-file", &init_params_file))  {
+    ReadKaldiObject(init_params_file, &init_params);  // will abort on failure.
+    Init(group_size, input_num_groups,
+         output_num_groups, init_params, false);
+  } else  {
+    Init(group_size, input_num_groups,
+         output_num_groups, param_stddev);
+  }
+
+  if (cfl->HasUnusedValues())
+    KALDI_ERR << "Could not process these elements in initializer: "
+              << cfl->UnusedValues();
+  if (!ok)
+    KALDI_ERR << "Bad initializer " << cfl->WholeLine();
+}
+
+void TensorMultiplyComponent::Scale(BaseFloat scale)  {
+  params_.Scale(scale);
+}
+
+void TensorMultiplyComponent::Add(BaseFloat alpha,
+                                  const UpdatableComponent &other_in) {
+  const TensorMultiplyComponent *other =
+      dynamic_cast<const TensorMultiplyComponent*>(&other_in);
+  KALDI_ASSERT(other != NULL);
+  params_.AddMat(alpha, other->params_);
+}
+
+void TensorMultiplyComponent::SetZero(bool treat_as_gradient) {
+  if (treat_as_gradient)  {
+    learning_rate_ = 1.0;  // don't call SetLearningRate, that would apply the
+                           // learning rate factor.
+    is_gradient_ = true;
+  }
+  params_.SetZero();
+}
+
+void TensorMultiplyComponent::Read(std::istream &is, bool binary) {
+  ReadUpdatableCommon(is, binary);  // Read opening tag and learning rate.
+  ExpectToken(is, binary, "<GroupSize>");
+  ReadBasicType(is, binary, &group_size_);
+  ExpectToken(is, binary, "<InputNumGroups>");
+  ReadBasicType(is, binary, &input_num_groups_);
+  ExpectToken(is, binary, "<OutputNumGroups>");
+  ReadBasicType(is, binary, &output_num_groups_);
+  ExpectToken(is, binary, "<Params>");
+  params_.Read(is, binary);
+  std::ostringstream ostr_end;
+  ostr_end << "</" << Type() << ">";  // e.g. "</AffineComponent>"
+  std::string tok;
+  ReadToken(is, binary, &tok);
+  if (tok == "<IsGradient>") {
+    ReadBasicType(is, binary, &is_gradient_);
+    ExpectToken(is, binary, ostr_end.str());
+  } else {
+    is_gradient_ = false;
+    KALDI_ASSERT(tok == ostr_end.str());
+  }
+}
+
+void TensorMultiplyComponent::Write(std::ostream &os, bool binary) const  {
+  WriteUpdatableCommon(os, binary);
+  WriteToken(os, binary, "<GroupSize>");
+  WriteBasicType(os, binary, group_size_);
+  WriteToken(os, binary, "<InputNumGroups>");
+  WriteBasicType(os, binary, input_num_groups_);
+  WriteToken(os, binary, "<OutputNumGroups>");
+  WriteBasicType(os, binary, output_num_groups_);
+  WriteToken(os, binary, "<Params>");
+  params_.Write(os, binary);
+  WriteToken(os, binary, "<IsGradient>");
+  WriteBasicType(os, binary, is_gradient_);
+  std::ostringstream ostr_end;
+  ostr_end << "</" << Type() << ">";  // e.g. "</AffineComponent>"
+  WriteToken(os, binary, ostr_end.str());
+}
+
+BaseFloat TensorMultiplyComponent::DotProduct(
+    const UpdatableComponent &other_in) const  {
+  const TensorMultiplyComponent *other =
+      dynamic_cast<const TensorMultiplyComponent*>(&other_in);
+  return TraceMatMat(params_, other->params_, kTrans);
+}
+
+Component* TensorMultiplyComponent::Copy() const  {
+  TensorMultiplyComponent *ans = new TensorMultiplyComponent();
+  ans->learning_rate_ = learning_rate_;
+  ans->group_size_ = group_size_;
+  ans->input_num_groups_ = input_num_groups_;
+  ans->output_num_groups_ = output_num_groups_;
+  ans->params_ = params_;
+  ans->is_gradient_ = is_gradient_;
+  return ans;
+}
+
+void TensorMultiplyComponent::PerturbParams(BaseFloat stddev) {
+  CuMatrix<BaseFloat> temp_params(params_);
+  temp_params.SetRandn();
+  params_.AddMat(stddev, temp_params);
+}
+
+int32 TensorMultiplyComponent::NumParameters() const {
+  return input_num_groups_ * output_num_groups_ * group_size_;
+}
+
+void TensorMultiplyComponent::Vectorize(VectorBase<BaseFloat> *params) const  {
+  params->Range(0, NumParameters()).CopyRowsFromMat(params_);
+}
+
+void TensorMultiplyComponent::UnVectorize(
+    const VectorBase<BaseFloat> &params)  {
+  params_.CopyRowsFromVec(params.Range(0, NumParameters()));
+}
+
+void TensorMultiplyComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
+                                        const CuMatrixBase<BaseFloat> &in,
+                                        CuMatrixBase<BaseFloat> *out) const {
+
+  out->TensorMultiply3D(1.0, output_num_groups_, in, input_num_groups_,
+                        params_, output_num_groups_,
+                        kTensor3DPairTransposeIlkkjl, 0.0);
+}
+
+void TensorMultiplyComponent::Backprop(const std::string &debug_info,
+                                       const ComponentPrecomputedIndexes *indexes,
+                                       const CuMatrixBase<BaseFloat> &in_value,
+                                       const CuMatrixBase<BaseFloat> &out_value,
+                                       const CuMatrixBase<BaseFloat> &out_deriv,
+                                       Component *to_update_in,
+                                       CuMatrixBase<BaseFloat> *in_deriv) const {
+  TensorMultiplyComponent *to_update =
+      dynamic_cast<TensorMultiplyComponent*>(to_update_in);
+  // Propagate the derivative back to the input.
+  in_deriv->TensorMultiply3D(1.0, input_num_groups_, out_deriv, output_num_groups_,
+                             params_, output_num_groups_,
+                             kTensor3DPairTransposeIlkklj, 0.0);
+
+  if (to_update != NULL)  {
+    to_update->Update(debug_info, in_value, out_deriv);
+  }
+}
+
+// UpdateSimple is used when *this is a gradient.  It's a simple version of
+// the update with no preconditioning; child classes that support
+// preconditioning will need to call this.
+void TensorMultiplyComponent::Update(const std::string &debug_info,
+                                     const CuMatrixBase<BaseFloat> &in_value,
+                                     const CuMatrixBase<BaseFloat> &out_deriv) {
+
+    params_.TensorMultiply3D(learning_rate_, output_num_groups_,
+                             in_value, input_num_groups_,
+                             out_deriv, output_num_groups_,
+                             kTensor3DPairTransposeLkilji, 1.0);
+}
 
 } // namespace nnet3
 } // namespace kaldi

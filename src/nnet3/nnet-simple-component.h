@@ -1736,6 +1736,147 @@ class CompositeComponent: public UpdatableComponent {
 
 };
 
+// TensorMultiplyComponent is a bit like AffineComponent, but where the
+// AffineComponent has no bias term and has a linear term with a block-diagonal
+// structure (but only after rearrangement of the input and output vectors).
+// The main projected use is after splicing over time (using Append descriptor),
+// when we want to reduce the dimension using linear combinations of different
+// time-offsets, with different coefficients for each feature dimension.  E.g.
+// delta feature extraction would be a special case of this.  We also plan to
+// use this component to support trainable nonlinearities (this would be done by
+// first having a component that expands out the input with fixed
+// nonlinearities, then applying TensorMultiplyComponent)
+// 
+// There is no interaction with the time dimension of the inputs, so everything
+// can be treated as vector input and vector output.  (If you want to get the
+// time dimension involved, you should use Append descriptor).  Consider a
+// single input vector in_vec and a corresponding output vector out_vec.  In the
+// AffineComponent, the operation would be:
+// 
+// out_vec = bias_params_ + linear_params_ * in_vec.
+//  
+// In TensorMultiply component, we interpret both in_vec and out_vec as
+// matrix-valued quantities, with in_vec interpreted as a matrix of size
+// (input_num_groups_ x group_size_) and out_vec interpreted as a matrix of size
+// (output_num_groups_ x group_size_).  In this interpretation we assume these
+// imaginary matrices have row-major format, so all the elements of the first
+// row are next to each other in memory, then all the elements of the second
+// row, and so on (stride == group_size_).
+// 
+// The parameter matrix params_ is a matrix of size
+// 
+// (group_size_ x (output_num_groups_ * input_num_groups_)),
+// 
+// which is interpreted as a 3d tensor with dimension (group_size_,
+// output_num_groups_, input_num_groups_).  The operation this class does is:
+// 
+//  for each i, j:  out_vec(i, j) := \sum_k in_vec(i, k) * params(i, j, k)
+//  
+// Of course this is done separately for each row of the input and output
+// matrices, so the actual internal operation is an operation on three
+// three-dimensional tensor quantities:
+// 
+//  for each i, j, k:  out_mat(i, j, k) := \sum_l in_vec(i, j, l) * params(j, k,
+//  l)
+//  
+// where in all cases, the first index corresponds to the row of the actual
+// matrix, and the second and third indexes correspond to (row, column) indexes
+// of an "imaginary" matrix stored in row-major format in each column of the
+// real matrix concerned.  So the strides concerned are ordered from largest to
+// smallest in all cases.
+// 
+// The derivative computation would be:
+// 
+//  for each i, j, k:  in_deriv(i, j, k) := \sum_l out_deriv(i, j, l) *
+//  params(j, l, k);
+// 
+// The parameter-derivative computation would be:
+// 
+//  for each i, j, k:  param_deriv(i, j, k) := \sum_l in_vec(l, i, k) *
+//  out_deriv(l, i, j) This class uses TensorMultiply3D method of matrix class
+//  to accomplish the above operations.
+
+class TensorMultiplyComponent: public UpdatableComponent {
+ public:
+  TensorMultiplyComponent(); // use Init to initialize.
+  explicit TensorMultiplyComponent(const TensorMultiplyComponent &other);
+  
+  virtual int32 InputDim() const { return group_size_ * input_num_groups_; }
+  virtual int32 OutputDim() const { return group_size_ * output_num_groups_; }
+
+  void Init(int32 group_size, int32 input_num_groups, int32 output_num_groups,
+            BaseFloat param_stddev);
+   void Init(int32 group_size, int32 input_num_groups, int32 output_num_groups,
+            CuMatrix<BaseFloat> & init_params, bool same_block=true);
+            
+  virtual std::string Info() const;
+  virtual void InitFromConfig(ConfigLine *cfl);
+  virtual std::string Type() const { return "TensorMultiplyComponent"; }
+  virtual int32 Properties() const {
+    return kSimpleComponent|kUpdatableComponent|kLinearInParameters;
+        
+  }
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const;
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &, // out_value
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+
+  virtual void Read(std::istream &is, bool binary);
+  virtual void Write(std::ostream &os, bool binary) const;
+
+  virtual Component* Copy() const;
+
+  // Some functions from base-class UpdatableComponent.
+  virtual void Scale(BaseFloat scale);
+  virtual void Add(BaseFloat alpha, const UpdatableComponent &other);
+  virtual void SetZero(bool treat_as_gradient);
+  virtual void PerturbParams(BaseFloat stddev);
+  virtual BaseFloat DotProduct(const UpdatableComponent &other) const;
+  virtual int32 NumParameters() const;
+  virtual void Vectorize(VectorBase<BaseFloat> *params) const;
+  virtual void UnVectorize(const VectorBase<BaseFloat> &params);
+
+ protected:
+  // This function Update() is for extensibility; child classes may override this.
+  virtual void Update(
+      const std::string &debug_info,
+      const CuMatrixBase<BaseFloat> &in_value,
+      const CuMatrixBase<BaseFloat> &out_deriv); 
+
+ private:
+  // disallow the assignment operator.
+  const TensorMultiplyComponent &operator = (const TensorMultiplyComponent &); 
+
+  // the input dim equals group_size_ times input_num_groups_.
+  int32 group_size_;  // size of each group of parameters; can be viewed as the
+                            // num-cols of a "virtual" matrix that we imagine in
+                            // each row of the input.  If this follows a SpliceComponent,
+                            // probably equal to the InputDim() of that component.
+  int32 input_num_groups_;  // must divide input_dim_; can be viewed as the
+                            // num-rows of a "virtual" matrix that we imagine in
+                            // each row of the input.  If this follows a
+                            // SpliceComponent, probably equal to the number of
+                            // context indexes.
+
+  // the output dim equals group_size_ times output_num_groups_.
+  int32 output_num_groups_;  
+
+  CuMatrix<BaseFloat> params_;  // dimension will equal group_size_ by
+                                // (output_num_groups_ * input_num_groups_).
+                                // View this as a 3-d tensor with dimensions
+                                // (group_size, output_num_groups,
+                                // input_num_groups_).
+  
+  bool is_gradient_; // If true, treat this as just a gradient.
+};
+
+
 
 } // namespace nnet3
 } // namespace kaldi
