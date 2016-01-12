@@ -1813,8 +1813,8 @@ class TensorMultiplyComponent: public UpdatableComponent {
   virtual void InitFromConfig(ConfigLine *cfl);
   virtual std::string Type() const { return "TensorMultiplyComponent"; }
   virtual int32 Properties() const {
-    return kSimpleComponent|kUpdatableComponent|kLinearInParameters;
-        
+    return kSimpleComponent|kUpdatableComponent|kLinearInParameters|
+           kBackpropNeedsInput;
   }
   virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
                          const CuMatrixBase<BaseFloat> &in,
@@ -1834,7 +1834,7 @@ class TensorMultiplyComponent: public UpdatableComponent {
 
   // Some functions from base-class UpdatableComponent.
   virtual void Scale(BaseFloat scale);
-  virtual void Add(BaseFloat alpha, const UpdatableComponent &other);
+  virtual void Add(BaseFloat alpha, const Component &other);
   virtual void SetZero(bool treat_as_gradient);
   virtual void PerturbParams(BaseFloat stddev);
   virtual BaseFloat DotProduct(const UpdatableComponent &other) const;

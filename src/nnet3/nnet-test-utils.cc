@@ -834,7 +834,7 @@ void ComputeExampleComputationRequestSimple(
 
 static void GenerateRandomComponentConfig(std::string *component_type,
                                           std::string *config) {
-  int32 n = RandInt(0, 27);
+  int32 n = RandInt(0, 28);
   BaseFloat learning_rate = 0.001 * RandInt(1, 3);
 
   std::ostringstream os;

@@ -4836,6 +4836,23 @@ void CompositeComponent::InitFromConfig(ConfigLine *cfl) {
 }
 
 
+TensorMultiplyComponent::TensorMultiplyComponent():
+  UpdatableComponent(),
+  group_size_(0),
+  input_num_groups_(0),
+  output_num_groups_(0),
+  is_gradient_(false) {}
+
+TensorMultiplyComponent::TensorMultiplyComponent(
+    const TensorMultiplyComponent &component):
+    UpdatableComponent(component),
+    group_size_(component.group_size_),
+    input_num_groups_(component.input_num_groups_),
+    output_num_groups_(component.output_num_groups_),
+    params_(component.params_)  { }
+
+
+
 void TensorMultiplyComponent::Init(int32 group_size, int32 input_num_groups,
                                    int32 output_num_groups,
                                    BaseFloat param_stddev)  {
@@ -4945,7 +4962,7 @@ void TensorMultiplyComponent::Scale(BaseFloat scale)  {
 }
 
 void TensorMultiplyComponent::Add(BaseFloat alpha,
-                                  const UpdatableComponent &other_in) {
+                                  const Component &other_in) {
   const TensorMultiplyComponent *other =
       dynamic_cast<const TensorMultiplyComponent*>(&other_in);
   KALDI_ASSERT(other != NULL);
@@ -5009,13 +5026,7 @@ BaseFloat TensorMultiplyComponent::DotProduct(
 }
 
 Component* TensorMultiplyComponent::Copy() const  {
-  TensorMultiplyComponent *ans = new TensorMultiplyComponent();
-  ans->learning_rate_ = learning_rate_;
-  ans->group_size_ = group_size_;
-  ans->input_num_groups_ = input_num_groups_;
-  ans->output_num_groups_ = output_num_groups_;
-  ans->params_ = params_;
-  ans->is_gradient_ = is_gradient_;
+  TensorMultiplyComponent *ans = new TensorMultiplyComponent(*this);
   return ans;
 }
 
@@ -5056,10 +5067,12 @@ void TensorMultiplyComponent::Backprop(const std::string &debug_info,
                                        CuMatrixBase<BaseFloat> *in_deriv) const {
   TensorMultiplyComponent *to_update =
       dynamic_cast<TensorMultiplyComponent*>(to_update_in);
+  
   // Propagate the derivative back to the input.
-  in_deriv->TensorMultiply3D(1.0, input_num_groups_, out_deriv, output_num_groups_,
-                             params_, output_num_groups_,
-                             kTensor3DPairTransposeIlkklj, 0.0);
+  if (in_deriv)
+    in_deriv->TensorMultiply3D(1.0, input_num_groups_, out_deriv, output_num_groups_,
+                               params_, output_num_groups_,
+                               kTensor3DPairTransposeIlkklj, 0.0);
 
   if (to_update != NULL)  {
     to_update->Update(debug_info, in_value, out_deriv);
