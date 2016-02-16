@@ -41,13 +41,14 @@ def RunKaldiCommand(command, wait = True):
 def GetSuccessfulModels(num_models, log_file_pattern, difference_threshold=1.0):
     assert(num_models > 0)
 
-    parse_regex = re.compile("LOG .* Overall average objective function for 'output' is ([0-9e.\-+]+) over ([0-9e.\-+]+) frames")
+    #parse_regex = re.compile("LOG .* Overall average objective function for 'output' is ([0-9e.\-+]+) over ([0-9e.\-+]+) frames")
+    parse_regex = re.compile("\[this line is to be parsed by a script:\] log-prob-per-frame=([0-9\-\.]+)")
     objf = []
     for i in range(num_models):
         model_num = i + 1
         logfile = re.sub('%', str(model_num), log_file_pattern)
         lines = open(logfile, 'r').readlines()
-        this_objf = -100000
+        this_objf = -1 * sys.float_info.max
         for line_num in range(1, len(lines) + 1):
             # we search from the end as this would result in
             # lesser number of regex searches. Python regex is slow !
