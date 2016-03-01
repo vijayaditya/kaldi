@@ -4,6 +4,7 @@
 from __future__ import division
 import sys, glob, re, math, datetime, argparse
 import imp
+import datetime as dt
 
 ntl = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
 
@@ -11,9 +12,7 @@ ntl = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
 def ParseProgressLogsForNonlinearityStats(exp_dir):
     progress_log_files = "%s/log/progress.*.log" % (exp_dir)
     stats_per_component_per_iter = {}
-
-    progress_log_lines  = ntl.RunKaldiCommand('grep -e "value-avg.*deriv-avg" {0}'.format(progress_log_files))[0]
-
+    progress_log_lines  = ntl.RunKaldiCommand('grep -e "value-avg.*deriv-avg" {0}'.format(progress_log_files), measure_time = True)[0]
     parse_regex = re.compile(".*progress.([0-9]+).log:component name=(.+) type=(.*)Component,.*value-avg=\[.*mean=([0-9\.\-e]+), stddev=([0-9\.e\-]+)\].*deriv-avg=\[.*mean=([0-9\.\-e]+), stddev=([0-9\.e\-]+)\]")
     for line in progress_log_lines.split("\n") :
         mat_obj = parse_regex.search(line)
@@ -53,7 +52,7 @@ def ParseProgressLogsForParamDiff(exp_dir, pattern):
     progress_log_files = "%s/log/progress.*.log" % (exp_dir)
     progress_per_iter = {}
     component_names = set([])
-    progress_log_lines = ntl.RunKaldiCommand('grep -e "{0}" {1}'.format(pattern, progress_log_files))[0]
+    progress_log_lines = ntl.RunKaldiCommand('grep -e "{0}" {1}'.format(pattern, progress_log_files), measure_time = True)[0]
     parse_regex = re.compile(".*progress\.([0-9]+)\.log:LOG.*{0}.*\[(.*)\]".format(pattern))
     for line in progress_log_lines.split("\n") :
         mat_obj = parse_regex.search(line)
@@ -89,7 +88,7 @@ def ParseProgressLogsForParamDiff(exp_dir, pattern):
 
 def ParseTrainLogs(exp_dir):
   train_log_files = "%s/log/train.*.log" % (exp_dir)
-  train_log_lines = ntl.RunKaldiCommand('grep -e Accounting {0}'.format(train_log_files))[0]
+  train_log_lines = ntl.RunKaldiCommand('grep -e Accounting {0}'.format(train_log_files), measure_time = True)[0]
   parse_regex = re.compile(".*train\.([0-9]+)\.([0-9]+)\.log:# Accounting: time=([0-9]+) thread.*")
 
   train_times = {}
@@ -111,8 +110,8 @@ def ParseTrainLogs(exp_dir):
 def ParseProbLogs(exp_dir, key = 'accuracy'):
     train_prob_files = "%s/log/compute_prob_train.*.log" % (exp_dir)
     valid_prob_files = "%s/log/compute_prob_valid.*.log" % (exp_dir)
-    train_prob_strings = ntl.RunKaldiCommand('grep -e {0} {1}'.format(key, train_prob_files), wait = True)[0]
-    valid_prob_strings = ntl.RunKaldiCommand('grep -e {0} {1}'.format(key, valid_prob_files))[0]
+    train_prob_strings = ntl.RunKaldiCommand('grep -e {0} {1}'.format(key, train_prob_files), wait = True, measure_time = True)[0]
+    valid_prob_strings = ntl.RunKaldiCommand('grep -e {0} {1}'.format(key, valid_prob_files), measure_time = True)[0]
 
     #LOG (nnet3-chain-compute-prob:PrintTotalStats():nnet-chain-diagnostics.cc:149) Overall log-probability for 'output' is -0.399395 + -0.013437 = -0.412832 per frame, over 20000 fra
     #LOG (nnet3-chain-compute-prob:PrintTotalStats():nnet-chain-diagnostics.cc:144) Overall log-probability for 'output' is -0.307255 per frame, over 20000 frames.

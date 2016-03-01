@@ -25,5 +25,5 @@ if [ "$(hostname -d)" == "fit.vutbr.cz" ]; then
   export train_cmd="queue.pl -q $queue -l ram_free=1.5G,mem_free=1.5G,${storage}=0.25"
   export decode_cmd="queue.pl -q $queue -l ram_free=2.5G,mem_free=2.5G,${storage}=0.1"
   export cuda_cmd="queue.pl -q long.q -l gpu=1"
-fi 
+fi
 

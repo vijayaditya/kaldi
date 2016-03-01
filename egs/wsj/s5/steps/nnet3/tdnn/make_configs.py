@@ -183,7 +183,9 @@ def CheckArgs(args):
 
     return args
 
-def AddPerDimAffineLayer(config_lines, name, input, input_window):
+
+def AddMultiDimAffineLayer(config_lines, name, input, input_window, block_input_dim, block_output_dim):
+    assert(block_input_dim % input_window== 0)
     filter_context = int((input_window - 1) / 2)
     filter_input_splice_indexes = range(-1 * filter_context, filter_context + 1)
     list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
@@ -204,11 +206,10 @@ def AddPerDimAffineLayer(config_lines, name, input, input_window):
             column_map.append(j * num_feats + i)
     permuted_output_descriptor = nodes.AddPermuteLayer(config_lines,
             name, filter_input_descriptor, column_map)
-
     # add a block-affine component
     output_descriptor = nodes.AddBlockAffineLayer(config_lines, name,
                                                   permuted_output_descriptor,
-                                                  num_feats, num_feats)
+                                                  num_feats / (block_input_dim / input_window) * block_output_dim, num_feats / (block_input_dim/ input_window))
 
     return [output_descriptor, filter_context, filter_context]
 
@@ -480,10 +481,10 @@ def MakeConfigs(config_dir, splice_indexes_string,
                 # add permute component to shuffle the feature columns of the Append descriptor output so
                 # that columns corresponding to the same feature index are contiguous
                 # add a block-affine component to collapse all the feature indexes across time steps into a single value
-                [prev_layer_output, cur_left_context, cur_right_context] = AddPerDimAffineLayer(config_lines,
-                                                                                            'Tdnn_input_PDA_{0}'.format(i),
-                                                                                            prev_layer_output,
-                                                                                            pool_window)
+                [prev_layer_output, cur_left_context, cur_right_context] = nodes.AddPerDimAffineLayer(config_lines,
+                                                                                                      'Tdnn_input_{0}'.format(i),
+                                                                                                       prev_layer_output,
+                                                                                                       pool_window)
 
                 left_context += cur_left_context
                 right_context += cur_right_context
@@ -493,6 +494,16 @@ def MakeConfigs(config_dir, splice_indexes_string,
                                                                                                    prev_layer_output,
                                                                                                    pool_window,
                                                                                                    10 * pool_window, 10)
+                left_context += cur_left_context
+                right_context += cur_right_context
+
+
+            elif pool_type == "multi-dim-weighted-average":
+                [prev_layer_output, cur_left_context, cur_right_context] = AddMultiDimAffineLayer(config_lines,
+                                                                                                  'Tdnn_input_{0}'.format(i),
+                                                                                                   prev_layer_output,
+                                                                                                   pool_window,
+                                                                                                   8 * pool_window, 8)
                 left_context += cur_left_context
                 right_context += cur_right_context
 

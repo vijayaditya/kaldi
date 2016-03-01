@@ -1,33 +1,48 @@
 #!/bin/bash
 
-# this is a replica of_6h script, but makes use of the python trainer
+# this is same as v2 script but with xent-regularization
+# it has a different splicing configuration
 set -e
 
 # configs for 'chain'
-stage=12
+affix=
+stage=10
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/tdnn_6h_py # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/tdnn_v5  # Note: _sp will get added to this if $speed_perturb == true.
+decode_iter=
 
+# TDNN options
+# this script uses the new tdnn config generator so it needs a final 0 to reflect that the final layer input has no splicing
+splice_indexes="-2,-1,0,1,2 -1,0,2 -3,0,3 -6,-3,0,3 -6,-3,0,3"
+# smoothing options
+pool_window=
+pool_type='none'
+pool_lpfilter_width=
+self_repair_scale=0.00001
+xent_regularize=0.2
 # training options
 num_epochs=4
 initial_effective_lrate=0.001
 final_effective_lrate=0.0001
 leftmost_questions_truncate=-1
-max_param_change=2.0
+max_param_change=1.0
 final_layer_normalize_target=0.5
 num_jobs_initial=3
 num_jobs_final=16
 minibatch_size=128
+relu_dim=700
 frames_per_eg=150
 remove_egs=false
-xent_regularize=0.1
+common_egs_dir=
+
+
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
 
-. ./cmd.sh
+. cmd.sh
 . ./path.sh
 . ./utils/parse_options.sh
 
@@ -48,11 +63,11 @@ if [ "$speed_perturb" == "true" ]; then
   suffix=_sp
 fi
 
-dir=${dir}$suffix
+dir=${dir}${affix:+_$affix}$suffix
 train_set=train_nodup$suffix
 ali_dir=exp/tri4_ali_nodup$suffix
-treedir=exp/chain/tri5_2y_tree$suffix
-lang=data/lang_chain_2y
+treedir=exp/chain/tri5_2o_tree$suffix
+lang=data/lang_chain_2o
 
 
 # if we are using the speed-perturbed data we need to generate
@@ -94,21 +109,30 @@ fi
 
 if [ $stage -le 12 ]; then
   echo "$0: creating neural net configs";
+  if [ ! -z "$relu_dim" ]; then
+    dim_opts="--relu-dim $relu_dim"
+  else
+    dim_opts="--pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
+  fi
 
-     steps/nnet3/make_jesus_configs.py \
-      --feat-dir data/${train_set}_hires \
-      --ivector-dir exp/nnet3/ivectors_${train_set} \
-      --tree-dir $treedir \
-      --splice-indexes "-1,0,1 -1,0,1,2 -3,0,3 -3,0,3 -3,0,3 -6,-3,0" \
-      --jesus-forward-input-dim 600 \
-      --jesus-forward-output-dim 1700 \
-      --jesus-hidden-dim 0 \
-      --jesus-stddev-scale 0.2 \
-      --final-layer-learning-rate-factor 0.25  \
-      --self-repair-scale 0.00001 \
-      --xent-separate-forward-affine=true \
-      --xent-regularize=$xent_regularize \
-      --include-log-softmax=false \
+  # create the config files for nnet initialization
+  pool_opts=
+  pool_opts=$pool_opts${pool_type:+" --pool-type $pool_type "}
+  pool_opts=$pool_opts${pool_window:+" --pool-window $pool_window "}
+  pool_opts=$pool_opts${pool_lpfilter_width:+" --pool-lpfilter-width $pool_lpfilter_width "}
+  repair_opts=${self_repair_scale:+" --self-repair-scale $self_repair_scale "}
+
+  python steps/nnet3/tdnn/make_configs.py $pool_opts \
+    $repair_opts \
+    --feat-dir data/${train_set}_hires \
+    --ivector-dir exp/nnet3/ivectors_${train_set} \
+    --tree-dir $treedir \
+    $dim_opts \
+    --splice-indexes "$splice_indexes"  \
+    --use-presoftmax-prior-scale false \
+    --xent-regularize $xent_regularize \
+    --include-log-softmax false \
+    --final-layer-normalize-target $final_layer_normalize_target \
     $dir/configs || exit 1;
 fi
 
@@ -125,11 +149,11 @@ if [ $stage -le 13 ]; then
     --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
-    --chain.leaky-hmm-coefficient 0.1 \
+    --chain.leaky-hmm-coefficient 0.00001 \
     --chain.l2-regularize 0.00005 \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
-    --egs.dir exp/chain/tdnn_2y_sp/egs \
+    --egs.dir "$common_egs_dir" \
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-width $frames_per_eg \
@@ -146,9 +170,10 @@ if [ $stage -le 13 ]; then
     --tree-dir $treedir \
     --lat-dir exp/tri4_lats_nodup$suffix \
     --dir $dir  || exit 1;
+
 fi
 
-if [ $stage -le 14 ]; then
+if [ $stage -le 13 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
@@ -157,18 +182,21 @@ fi
 
 decode_suff=sw1_tg
 graph_dir=$dir/graph_sw1_tg
-if [ $stage -le 15 ]; then
+if [ $stage -le 14 ]; then
+  iter_opts=
+  if [ ! -z $decode_iter ]; then
+    iter_opts=" --iter $decode_iter "
+  fi
   for decode_set in train_dev eval2000; do
       (
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
-         --extra-left-context 20 \
-          --nj 50 --cmd "$decode_cmd" \
+          --nj 50 --cmd "$decode_cmd" $iter_opts \
           --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
-         $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}_${decode_suff} || exit 1;
+          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_${decode_suff} || exit 1;
       if $has_fisher; then
           steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
             data/lang_sw1_{tg,fsh_fg} data/${decode_set}_hires \
-            $dir/decode_${decode_set}_sw1_{tg,fsh_fg} || exit 1;
+            $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_sw1_{tg,fsh_fg} || exit 1;
       fi
       ) &
   done

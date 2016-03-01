@@ -267,8 +267,7 @@ echo $egs_per_archive > $dir/info/egs_per_archive
 
 echo "$0: creating $num_archives archives, each with $egs_per_archive egs, with"
 echo "$0:   $frames_per_eg labels per example, and (left,right) context = ($left_context,$right_context)"
-
-
+echo $num_archives
 
 if [ -e $dir/storage ]; then
   # Make soft links to storage directories, if distributing this way..  See

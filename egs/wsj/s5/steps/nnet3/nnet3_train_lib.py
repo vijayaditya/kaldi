@@ -4,6 +4,7 @@ import math
 import re
 import time
 import argparse
+import datetime as dt
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -55,14 +56,18 @@ def CheckIfCudaCompiled():
     else:
         return True
 
-def RunKaldiCommand(command, wait = True):
+def RunKaldiCommand(command, wait = True, measure_time = False):
     """ Runs commands frequently seen in Kaldi scripts. These are usually a
         sequence of commands connected by pipes, so we use shell=True """
     #logger.info("Running the command\n{0}".format(command))
+    start_time = dt.datetime.now()
     p = subprocess.Popen(command, shell = True,
                          stdout = subprocess.PIPE,
                          stderr = subprocess.PIPE)
-
+    end_time = dt.datetime.now()
+    if measure_time:
+        duration = end_time - start_time
+        logger.info("Ran for {0} seconds".format(duration.seconds))
     if wait:
         [stdout, stderr] = p.communicate()
         if p.returncode is not 0:

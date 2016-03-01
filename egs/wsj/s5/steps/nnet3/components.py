@@ -202,7 +202,56 @@ def AddSoftmaxLayer(config_lines, name, input):
     return {'descriptor':  '{0}_log_softmax'.format(name),
             'dimension': input['dimension']}
 
+def AddPerDimAffineLayer(config_lines, name, input, input_window):
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
 
+    filter_context = int((input_window - 1) / 2)
+    filter_input_splice_indexes = range(-1 * filter_context, filter_context + 1)
+    list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
+    filter_input_descriptor = 'Append({0})'.format(' , '.join(list))
+    filter_input_descriptor = {'descriptor':filter_input_descriptor,
+                               'dimension':len(filter_input_splice_indexes) * input['dimension']}
+
+    # add permute component to shuffle the feature columns of the Append
+    # descriptor output so that columns corresponding to the same feature index
+    # are contiguous add a block-affine component to collapse all the feature
+    # indexes across time steps into a single value
+    num_feats = input['dimension']
+    num_times = len(filter_input_splice_indexes)
+    column_map = []
+    for i in range(num_feats):
+        for j in range(num_times):
+            column_map.append(j * num_feats + i)
+
+    composite_config_lines = {'components':[], 'component-nodes':[]}
+
+    permuted_output_descriptor = AddPermuteLayer(composite_config_lines,
+            name, filter_input_descriptor, column_map)
+
+    # add a block-affine component
+    output_descriptor = AddBlockAffineLayer(composite_config_lines, name,
+                                                  permuted_output_descriptor,
+                                                  num_feats, num_feats)
+
+
+    # strip names
+    ccl = composite_config_lines['components']
+    composite_config_line = ''
+    for index in range(len(ccl)):
+        parts = ccl[index].split()
+        assert(parts[0] == "component" and parts[1].split('=')[0] == "name")
+        composite_config_line += " component{0}='{1}'".format(index+1, " ".join(parts[2:]))
+
+    components.append("component name={name} type=CompositeComponent num-components={nc} {rest}".format(name = '{0}_PDA'.format(name),
+                   nc = len(ccl),
+                   rest = composite_config_line))
+    component_nodes.append("component-node name={0}_PDA component={0}_PDA input={1}".format(name, filter_input_descriptor['descriptor']))
+    return [{'descriptor': '{0}_PDA'.format(name),
+            'dimension': output_descriptor['dimension']
+            }, filter_context, filter_context]
+
+>>>>>>> Added tdnn pooling recipes & made composite components
 def AddSigmoidLayer(config_lines, name, input, self_repair_scale = None):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
