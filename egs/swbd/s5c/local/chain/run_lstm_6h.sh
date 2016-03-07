@@ -19,7 +19,7 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/lstm_6h  # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/lstm_6h2  # Note: _sp will get added to this if $speed_perturb == true.
 decode_iter=
 decode_dir_affix=
 

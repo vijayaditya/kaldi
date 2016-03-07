@@ -251,7 +251,6 @@ def AddPerDimAffineLayer(config_lines, name, input, input_window):
             'dimension': output_descriptor['dimension']
             }, filter_context, filter_context]
 
->>>>>>> Added tdnn pooling recipes & made composite components
 def AddSigmoidLayer(config_lines, name, input, self_repair_scale = None):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
