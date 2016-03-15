@@ -216,7 +216,7 @@ fi
 # num_hidden_layers=(something)
 . $dir/configs/vars || exit 1;
 
-context_opts="--left-context=$left_context --right-context=$right_context"
+context_opts="--left-context=$model_left_context --right-context=$model_right_context"
 
 ! [ "$num_hidden_layers" -gt 0 ] && echo \
  "$0: Expected num_hidden_layers to be defined" && exit 1;
@@ -230,8 +230,8 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   [ ! -z "$feat_type" ] && extra_opts+=(--feat-type $feat_type)
   [ ! -z "$online_ivector_dir" ] && extra_opts+=(--online-ivector-dir $online_ivector_dir)
   extra_opts+=(--transform-dir $transform_dir)
-  extra_opts+=(--left-context $left_context)
-  extra_opts+=(--right-context $right_context)
+  extra_opts+=(--left-context $model_left_context)
+  extra_opts+=(--right-context $model_right_context)
   echo "$0: calling get_egs.sh"
   steps/nnet3/get_egs.sh $egs_opts "${extra_opts[@]}" \
       --samples-per-iter $samples_per_iter --stage $get_egs_stage \
@@ -258,8 +258,8 @@ cp $egs_dir/{cmvn_opts,splice_opts,final.mat} $dir 2>/dev/null
 # the --egs-dir option was used on the command line).
 egs_left_context=$(cat $egs_dir/info/left_context) || exit -1
 egs_right_context=$(cat $egs_dir/info/right_context) || exit -1
- ( [ $egs_left_context -lt $left_context ] || \
-   [ $egs_right_context -lt $right_context ] ) && \
+ ( [ $egs_left_context -lt $model_left_context ] || \
+   [ $egs_right_context -lt $model_right_context ] ) && \
    echo "$0: egs in $egs_dir have too little context" && exit -1;
 
 frames_per_eg=$(cat $egs_dir/info/frames_per_eg) || { echo "error: no such file $egs_dir/info/frames_per_eg"; exit 1; }

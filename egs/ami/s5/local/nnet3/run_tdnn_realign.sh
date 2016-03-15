@@ -21,7 +21,6 @@ remove_egs=true
 relu_dim=850
 num_epochs=3
 use_ihm_ali=false
-max_wer=
 
 . cmd.sh
 . ./path.sh
@@ -35,10 +34,7 @@ where "nvcc" is installed.
 EOF
 fi
 
-local/nnet3/run_ivector_common.sh --stage $stage \
-                                  --mic $mic \
-                                  --use-ihm-ali $use_ihm_ali \
-                                  --use-sat-alignments $use_sat_alignments || exit 1;
+# we assume local/nnet3/run_tdnn.sh has already been run
 
 # we still support this option as all the TDNN, LSTM, BLSTM systems were built
 # using tri3a alignments
@@ -48,36 +44,36 @@ else
   gmm=tri3a
 fi
 
+ali_nnet_dir=nnet3/tdnn${speed_perturb:+_sp}${affix:+_$affix}
 if [ $use_ihm_ali == "true" ]; then
+  echo "Does not make sense " && exit 1;
   gmm_dir=exp/ihm/$gmm
+  ali_nnet_dir=exp/ihm/$ali_nnet_dir
   mic=${mic}_cleanali
-  ali_dir=${gmm_dir}_${mic}_train_parallel_sp_ali
 else
   gmm_dir=exp/$mic/$gmm
-  ali_dir=${gmm_dir}_${mic}_train_sp_ali
+  ali_nnet_dir=exp/$mic/$ali_nnet_dir
 fi
 
 final_lm=`cat data/local/lm/final_lm`
 LM=$final_lm.pr1-7
 graph_dir=$gmm_dir/graph_${LM}
+ali_dir=$ali_nnet_dir/train_sp_ali
 dir=exp/$mic/nnet3/tdnn${speed_perturb:+_sp}${affix:+_$affix}
-mkdir -p $dir
-train_data_dir=data/$mic/train_sp_hires
-if [ ! -z $max_wer ]; then
-  if [ $stage -le 10 ]; then
-    #steps/cleanup/find_bad_utts.sh --cmd "$decode_cmd" --nj 100 data/$mic/train_sp/ data/lang $ali_dir ${gmm_dir}_bad_utts
-    python local/sort_bad_utts.py --bad-utt-info-file ${gmm_dir}_bad_utts/all_info.sorted.txt --max-wer $max_wer --output-file $dir/wer_sorted_utts_${max_wer}wer
-    utils/copy_data_dir.sh data/$mic/train_sp_hires data/$mic/train_${max_wer}wer_sp_hires
-    utils/filter_scp.pl $dir/wer_sorted_utts_${max_wer}wer data/sdm1/train_sp_hires/feats.scp  > data/$mic/train_${max_wer}wer_sp_hires/feats.scp
-    utils/fix_data_dir.sh data/$mic/train_${max_wer}wer_sp_hires
-  fi
-  train_data_dir=data/$mic/train_${max_wer}wer_sp_hires
+dir=${dir}_realigned
+
+
+
+if [ $stage -le 1 ]; then
+  steps/nnet3/align.sh --nj 100 --cmd "$decode_cmd" \
+    --online-ivector-dir exp/$mic/nnet3/ivectors_train_sp_hires \
+    data/$mic/train_sp_hires data/lang $ali_nnet_dir $ali_dir  || exit 1;
 fi
 
-if [ $stage -le 11 ]; then
+if [ $stage -le 10 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
-     /export/b{09,10,11,12}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
+     /export/b{07,08,09,10}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
   fi
 
   steps/nnet3/tdnn/train.sh --stage $train_stage \
@@ -92,10 +88,10 @@ if [ $stage -le 11 ]; then
     --cmd "$decode_cmd" \
     --relu-dim "$relu_dim" \
     --remove-egs "$remove_egs" \
-    $train_data_dir data/lang $ali_dir $dir  || exit 1;
+    data/$mic/train_sp_hires data/lang $ali_dir $dir  || exit 1;
 fi
 
-if [ $stage -le 12 ]; then
+if [ $stage -le 11 ]; then
   # this version of the decoding treats each utterance separately
   # without carrying forward speaker information.
   for decode_set in dev eval; do

@@ -12,16 +12,23 @@ stage=0
 train_stage=-10
 mic=ihm
 use_sat_alignments=true
+exp_name=tdnn_a
 affix=
 speed_perturb=true
 common_egs_dir=
-splice_indexes="-2,-1,0,1,2 -1,2 -3,3 -7,2 -3,3 0 0"
+splice_indexes="-1,0,1 -1,0,1,2 -3,0,3 -3,0,3 -3,0,3 -6,-3,0 0"
 subset_dim=0
 remove_egs=true
-relu_dim=850
-num_epochs=3
+relu_dim=700 # to match params with tdnn_sp
 use_ihm_ali=false
 max_wer=
+
+# TDNN options
+# this script uses the new tdnn config generator so it needs a final 0 to reflect that the final layer input has no splicing
+# smoothing options
+pool_window=
+pool_type='none'
+pool_lpfilter_width=
 
 . cmd.sh
 . ./path.sh
@@ -60,7 +67,7 @@ fi
 final_lm=`cat data/local/lm/final_lm`
 LM=$final_lm.pr1-7
 graph_dir=$gmm_dir/graph_${LM}
-dir=exp/$mic/nnet3/tdnn${speed_perturb:+_sp}${affix:+_$affix}
+dir=exp/$mic/nnet3/${exp_name}${speed_perturb:+_sp}${affix:+_$affix}
 mkdir -p $dir
 train_data_dir=data/$mic/train_sp_hires
 if [ ! -z $max_wer ]; then
@@ -75,27 +82,60 @@ if [ ! -z $max_wer ]; then
 fi
 
 if [ $stage -le 11 ]; then
+  echo "$0: creating neural net configs";
+  if [ ! -z "$relu_dim" ]; then
+    dim_opts="--relu-dim $relu_dim"
+  else
+    dim_opts="--pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
+  fi
+  repair_opts=${self_repair_scale:+" --self-repair-scale $self_repair_scale "}
+
+  # create the config files for nnet initialization
+  pool_opts=
+  pool_opts=$pool_opts${pool_type:+" --pool-type $pool_type "}
+  pool_opts=$pool_opts${pool_window:+" --pool-window $pool_window "}
+  pool_opts=$pool_opts${pool_lpfilter_width:+" --pool-lpfilter-width $pool_lpfilter_width "}
+
+  # create the config files for nnet initialization
+  python steps/nnet3/tdnn/make_configs.py  $pool_opts \
+    $repair_opts \
+    --feat-dir $train_data_dir \
+    --ivector-dir exp/$mic/nnet3/ivectors_train_sp_hires \
+    --ali-dir $ali_dir \
+    $dim_opts \
+    --splice-indexes "$splice_indexes"  \
+    --use-presoftmax-prior-scale true \
+   $dir/configs || exit 1;
+fi
+
+if [ $stage -le 12 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
      /export/b{09,10,11,12}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
   fi
 
-  steps/nnet3/tdnn/train.sh --stage $train_stage \
-    --num-epochs $num_epochs --num-jobs-initial 2 --num-jobs-final 12 \
-    --splice-indexes "$splice_indexes" \
-    --subset-dim "$subset_dim" \
-    --feat-type raw \
-    --online-ivector-dir exp/$mic/nnet3/ivectors_train_sp_hires \
-    --cmvn-opts "--norm-means=false --norm-vars=false" \
-    --egs-dir "$common_egs_dir" \
-    --initial-effective-lrate 0.0015 --final-effective-lrate 0.00015 \
-    --cmd "$decode_cmd" \
-    --relu-dim "$relu_dim" \
-    --remove-egs "$remove_egs" \
-    $train_data_dir data/lang $ali_dir $dir  || exit 1;
+  steps/nnet3/train_dnn.py --stage=$train_stage \
+    --cmd="$decode_cmd" \
+    --feat.online-ivector-dir exp/$mic/nnet3/ivectors_train_sp_hires \
+    --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
+    --trainer.num-epochs 3 \
+    --trainer.optimization.num-jobs-initial 2 \
+    --trainer.optimization.num-jobs-final 12 \
+    --trainer.optimization.initial-effective-lrate 0.0015 \
+    --trainer.optimization.final-effective-lrate 0.00015 \
+    --egs.dir "$common_egs_dir" \
+    --cleanup.remove-egs $remove_egs \
+    --cleanup.preserve-model-interval 100 \
+    --use-gpu true \
+    --feat-dir=$train_data_dir \
+    --ali-dir $ali_dir \
+    --lang data/lang \
+    --reporting.email="$reporting_email" \
+    --dir=$dir  || exit 1;
+
 fi
 
-if [ $stage -le 12 ]; then
+if [ $stage -le 13 ]; then
   # this version of the decoding treats each utterance separately
   # without carrying forward speaker information.
   for decode_set in dev eval; do

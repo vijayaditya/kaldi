@@ -8,8 +8,8 @@ nmics=8 #we use all 8 channels, possible other options are 2 and 4
 mic=mdm$nmics
 
 # Path where AMI gets downloaded (or where locally available):
-AMI_DIR=$PWD/wav_db # Default, 
-case $(hostname -d) in 
+AMI_DIR=$PWD/wav_db # Default,
+case $(hostname -d) in
   fit.vutbr.cz) AMI_DIR=/mnt/scratch05/iveselyk/KALDI_AMI_WAV ;; # BUT,
   clsp.jhu.edu) AMI_DIR=/export/corpora4/ami/amicorpus ;; # JHU,
   cstr.ed.ac.uk) AMI_DIR= ;; # Edinburgh,
@@ -26,7 +26,7 @@ LM=$final_lm.pr1-7
 stage=0
 . utils/parse_options.sh
 
-# Set bash to 'debug' mode, it prints the commands (option '-x') and exits on : 
+# Set bash to 'debug' mode, it prints the commands (option '-x') and exits on :
 # -e 'error', -u 'undefined variable', -o pipefail 'error in pipeline',
 set -euxo pipefail
 
@@ -174,7 +174,7 @@ if [ $stage -le 13 ]; then
     --hidden-dim 850 \
     --splice-indexes "layer0/-2:-1:0:1:2 layer1/-1:2 layer2/-3:3 layer3/-7:2 layer4/-3:3" \
     --use-sat-alignments false
-  
+
   local/online/run_nnet2_ms_sp_disc.sh  \
     --mic $mic  \
     --gmm-dir exp/$mic/tri3a \
@@ -182,3 +182,25 @@ if [ $stage -le 13 ]; then
 fi
 
 echo "Done."
+
+
+# By default we do not build systems adapted to sessions for AMI in distant scnearios
+# as this does not help a lot (around 1%), but one can do this by running below code:
+#exit;
+false && {
+# Train tri4a, which is LDA+MLLT+SAT,
+steps/align_fmllr.sh --nj $nj --cmd "$train_cmd" \
+  data/$mic/train data/lang exp/$mic/tri3a exp/$mic/tri3a_ali-fmllr
+
+steps/train_sat.sh  --cmd "$train_cmd" \
+  5000 80000 data/$mic/train data/lang exp/$mic/tri3a_ali-fmllr exp/$mic/tri4a
+}
+# Decode,
+graph_dir=exp/$mic/tri4a/graph_${LM}
+$decode_cmd $graph_dir/mkgraph.log \
+  utils/mkgraph.sh data/lang_${LM} exp/$mic/tri4a $graph_dir
+steps/decode_fmllr.sh --nj $nj_dev --cmd "$decode_cmd" --config conf/decode.conf \
+  $graph_dir data/$mic/dev exp/$mic/tri4a/decode_dev_${LM}
+steps/decode_fmllr.sh --nj $nj_eval --cmd "$decode_cmd" --config conf/decode.conf \
+  $graph_dir data/$mic/eval exp/$mic/tri4a/decode_eval_${LM}
+

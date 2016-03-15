@@ -41,6 +41,7 @@ case $mic in
   ;;
   sdm*)
     echo "Using asclite for overlapped speech SDM (single distant mic),"
+    echo local/score_asclite.sh --asclite $asclite $orig_args
     eval local/score_asclite.sh --asclite $asclite $orig_args
   ;;
   mdm*)

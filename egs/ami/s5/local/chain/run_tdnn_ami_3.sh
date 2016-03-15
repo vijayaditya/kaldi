@@ -1,37 +1,21 @@
 #!/bin/bash
 
-# 6y is as 6w, but after fixing the config-generation script to use
-# a higher learning-rate factor for the final xent layer (it was otherwise
-# training too slowly).
-
-# WER results are inconclusive, but objective values are encouraging.
-# We'll keep the change as it makes sense.
-# local/chain/compare_wer.sh 6w 6y
-# System                       6w        6y
-# WER on train_dev(tg)      15.33     15.36
-# WER on train_dev(fg)      14.27     14.19
-# WER on eval2000(tg)        17.3      17.2
-# WER on eval2000(fg)        15.6      15.8
-# Final train prob       -0.10287 -0.102139
-# Final valid prob      -0.120451 -0.119654
-# Final train prob (xent)      -1.63586  -1.55598
-# Final valid prob (xent)      -1.67173  -1.58821
-
-# 6w is as 6v (a new tdnn-based recipe), but using 1.5 million not 1.2 million
-# frames per iter (and of course re-dumping the egs).
-
-# this is same as v2 script but with xent-regularization
-# it has a different splicing configuration
+#adapted from swbd's local/chain/6z.sh script. We change the TDNN config
+# but with larger tolerance(10 vs 5) for chain
 set -e
 
 # configs for 'chain'
-affix=
-stage=12
+stage=10
 train_stage=-10
 get_egs_stage=-10
+mic=ihm
+use_ihm_ali=false
+affix=
 speed_perturb=true
-dir=exp/chain/tdnn_6y  # Note: _sp will get added to this if $speed_perturb == true.
-decode_iter=
+common_egs_dir=
+splice_indexes="-1,0,1 -1,0,1,2 -3,0,3 -3,0,3 -3,0,3 -6,-3,0 0"
+subset_dim=0
+relu_dim=450
 
 # TDNN options
 # this script uses the new tdnn config generator so it needs a final 0 to reflect that the final layer input has no splicing
@@ -40,25 +24,22 @@ pool_window=
 pool_type='none'
 pool_lpfilter_width=
 self_repair_scale=0.00001
+
 # training options
 num_epochs=4
 initial_effective_lrate=0.001
 final_effective_lrate=0.0001
 leftmost_questions_truncate=-1
 max_param_change=2.0
-final_layer_normalize_target=0.5
-num_jobs_initial=3
-num_jobs_final=16
+final_layer_normalize_target=1.0
+num_jobs_initial=2
+num_jobs_final=12
 minibatch_size=128
-relu_dim=576
 frames_per_eg=150
-remove_egs=false
-common_egs_dir=
+remove_egs=true
 xent_regularize=0.1
 max_wer=
 min_seg_len=
-
-
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
@@ -79,23 +60,39 @@ fi
 # nnet3 setup, and you can skip them by setting "--stage 8" if you have already
 # run those things.
 
-suffix=
-if [ "$speed_perturb" == "true" ]; then
-  suffix=_sp
-fi
-
-dir=${dir}${affix:+_$affix}$suffix
-train_set=train_nodup$suffix
-ali_dir=exp/tri4_ali_nodup$suffix
-treedir=exp/chain/tri5_2y_tree$suffix
-lang=data/lang_chain_2y
-
-
 # if we are using the speed-perturbed data we need to generate
 # alignments for it.
 local/nnet3/run_ivector_common.sh --stage $stage \
-  --speed-perturb $speed_perturb \
-  --generate-alignments $speed_perturb || exit 1;
+                                  --mic $mic \
+                                  --use-ihm-ali $use_ihm_ali \
+                                  --use-sat-alignments true || exit 1;
+
+
+gmm=tri4a
+if [ $use_ihm_ali == "true" ]; then
+  gmm_dir=exp/ihm/$gmm
+  mic=${mic}_cleanali
+  ali_dir=${gmm_dir}_${mic}_train_parallel_sp_ali
+  lat_dir=${gmm_dir}_${mic}_train_parallel_sp_lats
+else
+  gmm_dir=exp/$mic/$gmm
+  ali_dir=${gmm_dir}_${mic}_train_sp_ali
+  lat_dir=${gmm_dir}_${mic}_train_sp_lats
+fi
+
+
+
+
+dir=exp/$mic/chain/tdnn${affix:+_$affix} # Note: _sp will get added to this if $speed_perturb == true.
+dir=${dir}_sp
+
+
+treedir=exp/$mic/chain/tri5_2y_tree_sp${affix:+_$affix}
+lang=data/$mic/lang_chain_2y${affix:+_$affix}
+
+final_lm=`cat data/local/lm/final_lm`
+LM=$final_lm.pr1-7
+graph_dir=$dir/graph_${LM}
 
 train_set=train_sp
 latgen_train_set=train_sp
@@ -120,17 +117,24 @@ if [ ! -z $min_seg_len ]; then
   train_set=${train_set}_min${min_seg_len}
   latgen_train_set=${latgen_train_set}_min${min_seg_len}
 
-if [ $stage -le 9 ]; then
-  # Get the alignments as lattices (gives the CTC training more freedom).
+  if [ $stage -le 11 ]; then
+    # realigning data as the segments would have changed
+    steps/align_fmllr.sh --nj 100 --cmd "$train_cmd" data/$mic/$latgen_train_set data/lang $gmm_dir ${ali_dir}_min${min_seg_len} || exit 1;
+  fi
+  ali_dir=${ali_dir}_min${min_seg_len}
+  lat_dir=${lat_dir}_min${min_seg_len}
+fi
+
+if [ $stage -le 12 ]; then
+  # Get the alignments as lattices (gives the chain training more freedom).
   # use the same num-jobs as the alignments
-  nj=$(cat exp/tri4_ali_nodup$suffix/num_jobs) || exit 1;
-  steps/align_fmllr_lats.sh --nj $nj --cmd "$train_cmd" data/$train_set \
-    data/lang exp/tri4 exp/tri4_lats_nodup$suffix
-  rm exp/tri4_lats_nodup$suffix/fsts.*.gz # save space
+  steps/align_fmllr_lats.sh --nj 100 --cmd "$train_cmd" data/$mic/$latgen_train_set \
+    data/lang $gmm_dir $lat_dir
+  rm $lat_dir/fsts.*.gz # save space
 fi
 
 
-if [ $stage -le 10 ]; then
+if [ $stage -le 13 ]; then
   # Create a version of the lang/ directory that has one state per phone in the
   # topo file. [note, it really has two states.. the first one is only repeated
   # once, the second one has zero or more repeats.]
@@ -143,15 +147,30 @@ if [ $stage -le 10 ]; then
   steps/nnet3/chain/gen_topo.py $nonsilphonelist $silphonelist >$lang/topo
 fi
 
-if [ $stage -le 11 ]; then
+if [ $stage -le 14 ]; then
   # Build a tree using our new topology.
   steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
       --leftmost-questions-truncate $leftmost_questions_truncate \
-      --cmd "$train_cmd" 9000 data/$train_set $lang $ali_dir $treedir
+      --cmd "$train_cmd" 4200 data/$mic/$latgen_train_set $lang $ali_dir $treedir
 fi
 
-if [ $stage -le 12 ]; then
+mkdir -p $dir
+train_data_dir=data/$mic/${train_set}_hires
+if [ ! -z $max_wer ]; then
+  if [ $stage -le 15 ]; then
+    bad_utts_dir=${gmm_dir}_${train_set}_bad_utts
+    steps/cleanup/find_bad_utts.sh --cmd "$decode_cmd" --nj 300 data/$mic/${train_set} data/lang $ali_dir $bad_utts_dir
+    python local/sort_bad_utts.py --bad-utt-info-file $bad_utts_dir/all_info.sorted.txt --max-wer $max_wer --output-file $dir/wer_sorted_utts_${max_wer}wer
+    utils/copy_data_dir.sh data/$mic/${train_set}_hires data/$mic/${train_set}_${max_wer}wer_hires
+    utils/filter_scp.pl $dir/wer_sorted_utts_${max_wer}wer data/sdm1/${train_set}_hires/feats.scp  > data/$mic/${train_set}_${max_wer}wer_hires/feats.scp
+    utils/fix_data_dir.sh data/$mic/${train_set}_${max_wer}wer_hires
+  fi
+  train_data_dir=data/$mic/${train_set}_${max_wer}wer_hires
+fi
+
+if [ $stage -le 16 ]; then
   echo "$0: creating neural net configs";
+
   if [ ! -z "$relu_dim" ]; then
     dim_opts="--relu-dim $relu_dim"
   else
@@ -167,37 +186,40 @@ if [ $stage -le 12 ]; then
 
   steps/nnet3/tdnn/make_configs.py $pool_opts \
     $repair_opts \
-    --feat-dir data/${train_set}_hires \
-    --ivector-dir exp/nnet3/ivectors_${train_set} \
+    --subset-dim "$subset_dim" \
+    --feat-dir $train_data_dir \
+    --ivector-dir exp/$mic/nnet3/ivectors_train_sp_hires \
     --tree-dir $treedir \
     $dim_opts \
-    --splice-indexes "-1,0,1 -1,0,1,2 -3,0,3 -3,0,3 -3,0,3 -6,-3,0 0" \
+    --splice-indexes "$splice_indexes"  \
     --use-presoftmax-prior-scale false \
     --xent-regularize $xent_regularize \
     --xent-separate-forward-affine true \
     --include-log-softmax false \
     --final-layer-normalize-target $final_layer_normalize_target \
-    $dir/configs || exit 1;
+   $dir/configs || exit 1;
 fi
 
-if [ $stage -le 13 ]; then
+if [ $stage -le 17 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
-     /export/b0{5,6,7,8}/$USER/kaldi-data/egs/swbd-$(date +'%m_%d_%H_%M')/s5c/$dir/egs/storage $dir/egs/storage
+     /export/b0{5,6,7,8}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
   fi
 
  touch $dir/egs/.nodelete # keep egs around when that run dies.
 
  steps/nnet3/chain/train.py --stage $train_stage \
     --cmd "$decode_cmd" \
-    --egs.dir exp/chain/tdnn_6w_sp/egs \
-    --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \
+    --feat.online-ivector-dir exp/$mic/nnet3/ivectors_${train_set}_hires \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
+    --chain.left-tolerance 10 \
+    --chain.right-tolerance 10 \
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
     --chain.l2-regularize 0.00005 \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
+    --egs.dir "$common_egs_dir" \
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-width $frames_per_eg \
@@ -210,38 +232,29 @@ if [ $stage -le 13 ]; then
     --trainer.optimization.final-effective-lrate $final_effective_lrate \
     --trainer.max-param-change $max_param_change \
     --cleanup.remove-egs $remove_egs \
-    --feat-dir data/${train_set}_hires \
+    --feat-dir $train_data_dir \
     --tree-dir $treedir \
-    --lat-dir exp/tri4_lats_nodup$suffix \
+    --lat-dir $lat_dir \
     --dir $dir  || exit 1;
-
 fi
 
-if [ $stage -le 13 ]; then
+if [ $stage -le 18 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
-  utils/mkgraph.sh --self-loop-scale 1.0 data/lang_sw1_tg $dir $dir/graph_sw1_tg
+  utils/mkgraph.sh --self-loop-scale 1.0 data/lang_${LM} $dir $graph_dir
 fi
 
-decode_suff=sw1_tg
-graph_dir=$dir/graph_sw1_tg
-if [ $stage -le 14 ]; then
-  iter_opts=
-  if [ ! -z $decode_iter ]; then
-    iter_opts=" --iter $decode_iter "
-  fi
-  for decode_set in train_dev eval2000; do
+if [ $stage -le 19 ]; then
+  for decode_set in dev eval; do
       (
+      num_jobs=`cat data/$mic/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
+
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
-          --nj 50 --cmd "$decode_cmd" $iter_opts \
-          --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
-          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_${decode_suff} || exit 1;
-      if $has_fisher; then
-          steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
-            data/lang_sw1_{tg,fsh_fg} data/${decode_set}_hires \
-            $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_sw1_{tg,fsh_fg} || exit 1;
-      fi
+         --extra-left-context 20 \
+          --nj $num_jobs --cmd "$decode_cmd" \
+          --online-ivector-dir exp/$mic/nnet3/ivectors_${decode_set} \
+         $graph_dir data/$mic/${decode_set}_hires $dir/decode_${decode_set} || exit 1;
       ) &
   done
 fi

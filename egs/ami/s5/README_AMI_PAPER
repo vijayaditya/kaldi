@@ -1,0 +1,65 @@
+#adapted from swbd's local/chain/6z.sh script. We change the TDNN config
+# These are the other modifications:
+#   1. AMI data has a lot of short segments so we use combine_short_segments.py
+#      to combine contiguous segments to have a minimum_duration of 1.55 secs.
+#      This is done to ensure that chain/get_egs.sh does not discard the
+#      shorter segments
+#   2. AMI data has a lot of alignment errors so we add an option to discard
+#      segments with a lot of alignment errors. These are identified using
+#      find_bad_utt.sh
+
+# these are results with a slighly different min_seg_len=2secs and an older steps/cleanup/combine_short_segments.sh script
+# also the trees for these results were built with min_seg_len=2 utterances, I moved tree building stage prior to segment
+# combination, as I don't think it is affected by the minor change in alignments.
+# Current experiments show that max-wer setting is not helpful when --use-ihm-ali=true
+#---------------------------
+##################### Systems with alignments from same acoustic data as features ###########################
+  # Individual headset microphone systems
+  #----------------------------------------
+  # local/chain/run_tdnn_ami_5.sh  --mic ihm --affix min_seg_len2 (built with min-seg-len 2 secs, but script now just supports (frames_per_eg+5)/100)
+  # %WER 22.6 | 13098 94486 | 80.3 10.6 9.1 2.9 22.6 54.9 | 0.086 | exp/ihm/chain/tdnn_min_seg_len2_sp/decode_dev/ascore_10/dev_hires.ctm.filt.sys
+  # %WER 22.5 | 12643 89975 | 80.2 12.3 7.4 2.7 22.5 52.8 | 0.153 | exp/ihm/chain/tdnn_min_seg_len2_sp/decode_eval/ascore_10/eval_hires.ctm.filt.sys
+
+  # local/chain/run_tdnn_ami_5.sh  --mic ihm --max-wer 50 --affix min_seg_len2_50wer (built with min-seg-len 2 secs, but script now just supports (frames_per_eg+5)/100)
+  # %WER 22.4 | 13098 94484 | 80.5 10.7 8.8 3.0 22.4 54.8 | 0.091 | exp/ihm/chain/tdnn_min_seg_len2_50wer_sp/decode_dev/ascore_10/dev_hires.ctm.filt.sys
+  # %WER 22.4 | 12643 89973 | 80.3 12.6 7.1 2.8 22.4 53.2 | 0.155 | exp/ihm/chain/tdnn_min_seg_len2_50wer_sp/decode_eval/ascore_10/eval_hires.ctm.filt.sys
+
+  # Multiple distant microphone systems
+  #----------------------------------------
+  # local/chain/run_tdnn_ami_5.sh  --mic mdm8 --affix min_seg_len2 (built with min-seg-len 2 secs, but script now just supports (frames_per_eg+5)/100)
+  # %WER 40.0 | 15332 94473 | 63.1 15.8 21.0 3.2 40.0 63.9 | 0.604 | exp/mdm8/chain/tdnn_min_seg_len2_sp/decode_dev/ascore_9/dev_hires_o4.ctm.filt.sys
+  # %WER 43.2 | 13630 89954 | 59.8 16.5 23.8 3.0 43.2 68.0 | 0.587 | exp/mdm8/chain/tdnn_min_seg_len2_sp/decode_eval/ascore_9/eval_hires_o4.ctm.filt.sys
+
+  # local/chain/run_tdnn_ami_5.sh  --mic mdm8 --max-wer 50 --affix min_seg_len2_50wer (built with min-seg-len 2 secs, but script now just supports (frames_per_eg+5)/100)
+  # %WER 38.8 | 14180 94493 | 65.1 17.2 17.7 3.8 38.8 69.4 | 0.617 | exp/mdm8/chain/tdnn_min_seg_len2_50wer_sp/decode_dev/ascore_9/dev_hires_o4.ctm.filt.sys
+  # %WER 42.1 | 13960 89974 | 61.4 18.0 20.6 3.4 42.1 66.2 | 0.591 | exp/mdm8/chain/tdnn_min_seg_len2_50wer_sp/decode_eval/ascore_9/eval_hires_o4.ctm.filt.sys
+
+  # Single distant microphone systems
+  #----------------------------------------
+  # local/chain/run_tdnn_ami_5.sh  --mic sdm1 --affix min_seg_len2 (built with min-seg-len 2 secs, but script now just supports (frames_per_eg+5)/100)
+  # %WER 43.5 | 14629 94479 | 59.5 17.6 22.9 3.0 43.5 67.8 | 0.577 | exp/sdm1/chain/tdnn_min_seg_len2_sp/decode_dev/ascore_9/dev_hires_o4.ctm.filt.sys
+  # %WER 47.3 | 13210 89956 | 55.9 19.1 25.1 3.2 47.3 71.8 | 0.555 | exp/sdm1/chain/tdnn_min_seg_len2_sp/decode_eval/ascore_9/eval_hires_o4.ctm.filt.sys
+
+  # local/chain/run_tdnn_ami_5.sh  --mic sdm1 --max-wer 50 --affix min_seg_len2_50wer (built with min-seg-len 2 secs, but script now just supports (frames_per_eg+5)/100)
+  # %WER 42.8 | 14535 94491 | 60.7 18.7 20.6 3.6 42.8 68.4 | 0.583 | exp/sdm1/chain/tdnn_min_seg_len2_50wer_sp/decode_dev/ascore_9/dev_hires_o4.ctm.filt.sys
+  # %WER 46.4 | 13101 89971 | 57.0 20.3 22.6 3.4 46.4 72.1 | 0.555 | exp/sdm1/chain/tdnn_min_seg_len2_50wer_sp/decode_eval/ascore_9/eval_hires_o4.ctm.filt.sys
+
+##################### Systems with alignments from individual head-set microphone data ###########################
+  # Multiple distant microphone systems
+  #----------------------------------------
+  # local/chain/run_tdnn_ami_5.sh  --mic mdm8 --use-ihm-ali true --affix min_seg_len2 (built with min-seg-len 2 secs, but script now just supports (frames_per_eg+5)/100)
+  # %WER 38.2 | 14638 94499 | 65.3 17.1 17.6 3.5 38.2 65.7 | 0.616 | exp/mdm8_cleanali/chain/tdnn_min_seg_len2_sp/decode_dev/ascore_9/dev_hires_o4.ctm.filt.sys
+  # %WER 42.0 | 14054 89957 | 61.0 17.6 21.4 3.0 42.0 64.8 | 0.596 | exp/mdm8_cleanali/chain/tdnn_min_seg_len2_sp/decode_eval/ascore_9/eval_hires_o4.ctm.filt.sys
+
+  # local/chain/run_tdnn_ami_5.sh  --mic mdm8 --use-ihm-ali true --max-wer 50
+  # running
+
+  # Single distant microphone systems
+  #----------------------------------------
+  # local/chain/run_tdnn_ami_5.sh  --mic sdm1 --use-ihm-ali true --affix min_seg_len2 (built with min-seg-len 2 secs, but script now just supports (frames_per_eg+5)/100)
+  # %WER 41.3 | 14041 94506 | 62.1 19.4 18.5 3.4 41.3 69.2 | 0.587 | exp/sdm1_cleanali/chain/tdnn_min_seg_len2_sp/decode_dev/ascore_9/dev_hires_o4.ctm.filt.sys
+  # %WER 45.3 | 14052 89969 | 57.9 20.9 21.2 3.2 45.3 66.2 | 0.563 | exp/sdm1_cleanali/chain/tdnn_min_seg_len2_sp/decode_eval/ascore_9/eval_hires_o4.ctm.filt.sys
+
+  # local/chain/run_tdnn_ami_5.sh  --mic sdm1 --use-ihm-ali true --max-wer 50 --affix msl1.5_50wer (built with min-seg-len (frames_per_eg+5)/100)
+  # %WER 41.6 | 14793 94504 | 61.8 19.3 18.9 3.4 41.6 65.3 | 0.591 | exp/sdm1_cleanali/chain/tdnn_ami4_msl1.5_50wer_sp/decode_dev/ascore_9/dev_hires_o4.ctm.filt.sys
+  # %WER 45.4 | 14141 89972 | 57.9 20.7 21.4 3.3 45.4 64.8 | 0.567 | exp/sdm1_cleanali/chain/tdnn_ami4_msl1.5_50wer_sp/decode_eval/ascore_9/eval_hires_o4.ctm.filt.sys

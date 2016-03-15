@@ -41,6 +41,7 @@ if [ "$use_ihm_ali" == "true" ]; then
   fi
   # prepare the parallel data directory ${mic}_clean_ali
   # generate alignments from the perturbed parallel data
+  echo "Preparing perturbed alignments from ihm data"
   local/nnet3/prepare_parallel_perturbed_alignments.sh --stage $stage \
                                                        --mic $mic \
                                                        --new-mic ${mic}_cleanali \
@@ -51,6 +52,7 @@ if [ "$use_ihm_ali" == "true" ]; then
   ali_dir=exp/ihm/${gmm}_${mic}_train_parallel_sp_ali
 else
   # prepare the perturbed data directory and generate alignments
+  echo "Preparing perturbed alignments from $mic data"
   local/nnet3/prepare_perturbed_alignments.sh --stage $stage --mic $mic \
                                               --use-sat-alignments $use_sat_alignments
 

@@ -39,12 +39,13 @@ speed_perturb_datadir() {
       steps/compute_cmvn_stats.sh data/$mic/$x exp/make_${mic}_mfcc/$x $mfccdir || exit 1;
     done
   fi
-  utils/fix_data_dir.sh data/$mic/${dataset}_sp
+  utils/fix_data_dir.sh data/$mic/${dataset}_sp || exit 1;
 }
 
 if [ $stage -le 0 ]; then
   # we will use ihm alignments as targets
-  # but as the segment names differ we will create a new data dir 
+  # but as the segment names differ we will create a new data dir
+  echo "Preparing parallel data directories, for generating alignments"
   local/nnet3/prepare_parallel_datadirs.sh --original-mic $mic \
                                            --parallel-mic ihm \
                                            --new-mic $new_mic
@@ -67,16 +68,17 @@ fi
 
 if [ $stage -le 2 ]; then
   # if we are using the ihm alignments we just need features for the parallel
-  # data, the actual data is being perturbed just so that we can copy this 
+  # data, the actual data is being perturbed just so that we can copy this
   # directory to create hiresolution features later
-  speed_perturb_datadir $mic train_parallel true 
+  speed_perturb_datadir $mic train_parallel true
   speed_perturb_datadir $mic train false
 fi
 
 if [ $stage -le 3 ]; then
-  # we just need to recreate alignments in case we perturbed the data 
+  # we just need to recreate alignments in case we perturbed the data
   # or in the case we are using ihm alignments, else the alignments would already
   # have been generated when we built the GMM-HMM systems
+  echo "Generating alignments"
   data_set=train_parallel_sp
   if [ "$use_sat_alignments" == "true" ]; then
     gmm_dir=exp/ihm/tri4a

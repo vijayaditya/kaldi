@@ -134,7 +134,7 @@ def GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_base
             if data.shape[0] == 0:
                 raise Exception("Couldn't find any rows for the accuracy plot")
             data = data[data[:,0]>=start_iter, :]
-            plot_handle, = plt.plot(data[:, 0], data[:, 1], color = color_val, linestyle = "--", label = "train {0}".format(dir))
+            plot_handle, = plt.plot(data[:, 0], data[:, 1], color = color_val, linestyle = "--", marker = 'x', label = "train {0}".format(dir))
             plots.append(plot_handle)
             plot_handle, = plt.plot(data[:, 0], data[:, 2], color = color_val, label = "valid {0}".format(dir))
             plots.append(plot_handle)
@@ -269,8 +269,11 @@ def GeneratePlots(exp_dir, output_dir, comparison_dir = None, start_iter = 1, is
         logger.info("Generating log-likelihood plots")
         GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'log-likelihood', file_basename = 'loglikelihood', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
 
-    logger.info("Generating non-linearity stats plots")
-    GenerateNonlinStatsPlots(exp_dir, output_dir, plot, comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
+    try:
+        logger.info("Generating non-linearity stats plots")
+        GenerateNonlinStatsPlots(exp_dir, output_dir, plot, comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
+    except Exception:
+        pass
 
     logger.info("Generating parameter difference files")
     # Parameter changes
