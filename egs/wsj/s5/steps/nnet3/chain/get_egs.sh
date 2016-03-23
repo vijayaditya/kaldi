@@ -61,7 +61,7 @@ stage=0
 nj=15         # This should be set to the maximum number of jobs you are
               # comfortable to run in parallel; you can increase it if your disk
               # speed is greater and you have more machines.
-max_shuffle_jobs_run=50  # the shuffle jobs now include the nnet3-chain-normalize-egs command,
+max_shuffle_jobs_run=100  # the shuffle jobs now include the nnet3-chain-normalize-egs command,
                          # which is fairly CPU intensive, so we can run quite a few at once
                          # without overloading the disks.
 online_ivector_dir=  # can be used if we are including speaker information as iVectors.

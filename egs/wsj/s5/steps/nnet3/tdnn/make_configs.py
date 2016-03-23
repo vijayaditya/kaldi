@@ -488,15 +488,6 @@ def MakeConfigs(config_dir, splice_indexes_string,
 
                 left_context += cur_left_context
                 right_context += cur_right_context
-            elif pool_type == "multi-dim-weighted-average":
-                [prev_layer_output, cur_left_context, cur_right_context] = AddMultiDimAffineLayer(config_lines,
-                                                                                                  'Tdnn_input_PDA_{0}'.format(i),
-                                                                                                   prev_layer_output,
-                                                                                                   pool_window,
-                                                                                                   10 * pool_window, 10)
-                left_context += cur_left_context
-                right_context += cur_right_context
-
 
             elif pool_type == "multi-dim-weighted-average":
                 [prev_layer_output, cur_left_context, cur_right_context] = AddMultiDimAffineLayer(config_lines,

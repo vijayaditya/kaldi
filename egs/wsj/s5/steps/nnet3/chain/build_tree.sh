@@ -163,7 +163,7 @@ if [ $stage -le -2 ]; then
 fi
 
 if [ $stage -le -1 ]; then
-  # Convert the alignments to the new tree.  Note: we likely will not use these
+  # Convert the1alignments to the new tree.  Note: we likely will not use these
   # converted alignments in the CTC system directly, but they could be useful
   # for other purposes.
   echo "$0: Converting alignments from $alidir to use current tree"
