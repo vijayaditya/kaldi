@@ -48,7 +48,7 @@ def GetArgs():
     parser.add_argument('--cnn.layer', type=str, action='append', dest = "cnn_layer",
                         help="CNN parameters at each CNN layer, e.g. --filt-x-dim=3 --filt-y-dim=8 "
                         "--filt-x-step=1 --filt-y-step=1 --num-filters=256 --pool-x-size=1 --pool-y-size=3 "
-                        "--pool-z-size=1 --pool-x-step=1 --pool-y-step=3 --pool-z-step=1, " 
+                        "--pool-z-size=1 --pool-x-step=1 --pool-y-step=3 --pool-z-step=1, "
                         "when CNN layers are used, no LDA will be added", default = None)
     parser.add_argument("--cnn.bottleneck-dim", type=int, dest = "cnn_bottleneck_dim",
                         help="Output dimension of the linear layer at the CNN output "
@@ -69,7 +69,7 @@ def GetArgs():
                         help="If \"true\" an LDA matrix computed from the input features "
                         "(spliced according to the first set of splice-indexes) will be used as "
                         "the first Affine layer. This affine layer's parameters are fixed during training. "
-                        "If --cnn.layer is specified this option will be forced to \"false\".", 
+                        "If --cnn.layer is specified this option will be forced to \"false\".",
                         default=True, choices = ["false", "true"])
 
     parser.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
@@ -258,8 +258,8 @@ def AddLpFilter(config_lines, name, input, rate, num_lpfilter_taps, lpfilt_filen
     nnet3_train_lib.WriteKaldiMatrix(lpfilt_filename, [lp_filter])
     filter_context = int((num_lpfilter_taps - 1) / 2)
     filter_input_splice_indexes = range(-1 * filter_context, filter_context + 1)
-    list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
-    filter_input_descriptor = 'Append({0})'.format(' , '.join(list))
+    index_list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
+    filter_input_descriptor = 'Append({0})'.format(' , '.join(index_list))
     filter_input_descriptor = {'descriptor':filter_input_descriptor,
                                'dimension':len(filter_input_splice_indexes) * input['dimension']}
 
@@ -440,7 +440,7 @@ def MakeConfigs(config_dir, splice_indexes_string,
     config_files[config_dir + '/init.config'] = init_config_lines
 
     if cnn_layer is not None:
-        prev_layer_output = AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir, 
+        prev_layer_output = AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir,
                                          feat_dim, splice_indexes[0], ivector_dim)
 
     if add_lda:
