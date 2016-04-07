@@ -25,6 +25,7 @@ chunk_right_context=40
 
 
 # decode options
+decode_suffix=
 extra_left_context=
 extra_right_context=
 frames_per_chunk=
@@ -166,7 +167,7 @@ if [ $stage -le 19 ]; then
           --frames-per-chunk "$frames_per_chunk" \
           --online-ivector-dir exp/$mic/nnet3/ivectors_${decode_set} \
           --scoring-opts "--min-lmwt 5 " \
-         $graph_dir data/$mic/${decode_set}_hires $dir/decode_${decode_set} || exit 1;
+         $graph_dir data/$mic/${decode_set}_hires $dir/decode_${decode_set}${decode_suffix:+_$decode_suffix} || exit 1;
       ) &
   done
 fi
