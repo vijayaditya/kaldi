@@ -29,11 +29,17 @@ def GetUtt2Uniq(data_dir):
             uniq2utt[parts[1]] = [parts[0]]
     return utt2uniq, uniq2utt
 
-def GetNumFrames(data_dir):
+def GetNumFrames(data_dir, utts = None):
     GenerateUtt2Dur(data_dir)
     frame_shift = GetFrameShift(data_dir)
     total_duration = 0
-    for item in GetUtt2Dur(data_dir).items():
-        total_duration = total_duration + item[1]
+    utt2dur = GetUtt2Dur(data_dir)
+    if utts is None:
+        utts = utt2dur.keys()
+    for utt in utts:
+        total_duration = total_duration + utt2dur[utt]
     return int(float(total_duration)/frame_shift)
+
+def CreateDataLinks(file_names):
+    RunKaldiCommand(" utils/create_data_link.pl {files}".format(" ".join(file_names)))
 
