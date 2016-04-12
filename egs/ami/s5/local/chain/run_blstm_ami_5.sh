@@ -19,7 +19,7 @@ common_egs_dir=
 exp_name=blstm_ami5
 
 # LSTM options
-chunk_width=150
+chunk_widths="100 125 150"
 chunk_left_context=40
 chunk_right_context=40
 
@@ -62,11 +62,11 @@ fi
 dir=exp/$new_mic/chain/${exp_name}${affix:+_$affix}_sp
 treedir=exp/$new_mic/chain/tri5_2y_tree_sp
 lang=data/$new_mic/lang_chain_2y
-
+max_chunk_width=$(python -c "print max(map(lambda x: int(x), '$chunk_widths'.split()))")
 local/chain/run_chain_common.sh --stage $stage \
                                 --mic $mic \
                                 --use-ihm-ali $use_ihm_ali \
-                                --frames-per-eg $chunk_width \
+                                --frames-per-eg $max_chunk_width \
                                 --max-wer $max_wer \
                                 --dir $dir \
                                 --treedir $treedir \
@@ -103,7 +103,7 @@ fi
 if [ $stage -le 17 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
-     /export/b0{8,9,10,11,12}/$USER/kaldi-data/egs/swbd-$(date +'%m_%d_%H_%M')/s5c/$dir/egs/storage $dir/egs/storage
+     /export/b{08,09,10,11,12}/$USER/kaldi-data/egs/swbd-$(date +'%m_%d_%H_%M')/s5c/$dir/egs/storage $dir/egs/storage
   fi
 
  touch $dir/egs/.nodelete # keep egs around when that run dies.
@@ -130,9 +130,11 @@ if [ $stage -le 17 ]; then
     --trainer.optimization.momentum 0.0 \
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0" \
-    --egs.chunk-width $chunk_width \
-    --egs.chunk-left-context $chunk_left_context \
-    --egs.chunk-right-context $chunk_right_context \
+    --egs.chunk-widths="$chunk_widths" \
+    --egs.min-chunk-left-context 20 \
+    --egs.max-chunk-left-context 60 \
+    --egs.min-chunk-right-context 20 \
+    --egs.max-chunk-right-context 60 \
     --egs.dir "$common_egs_dir" \
     --cleanup.remove-egs true \
     --feat-dir $train_data_dir \

@@ -126,7 +126,7 @@ def GetIvectorDim(ivector_dir = None):
 def GetIvectorPeriod(ivector_dir = None):
     if ivector_dir is None:
         return 0
-    return int(open('{0}/ivector_period', 'r').readline().strip())
+    return int(open('{0}/ivector_period'.format(ivector_dir), 'r').readline().strip())
 
 
 def GetFeatDim(feat_dir):

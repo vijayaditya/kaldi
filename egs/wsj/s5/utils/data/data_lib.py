@@ -1,10 +1,15 @@
 
+import imp
+import os
+
+train_lib = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
+
 def GetFrameShift(data_dir):
-    frame_shift, = RunKaldiCommand("utils/data/get_frame_shift.sh {0}".format(data_dir))
-    return int(frame_shift)
+    frame_shift = train_lib.RunKaldiCommand("utils/data/get_frame_shift.sh {0}".format(data_dir))[0]
+    return float(frame_shift.strip())
 
 def GenerateUtt2Dur(data_dir):
-    RunKaldiCommand("utils/data/get_utt2dur.sh {0}".format(data_dir))
+    train_lib.RunKaldiCommand("utils/data/get_utt2dur.sh {0}".format(data_dir))
 
 def GetUtt2Dur(data_dir):
     GenerateUtt2Dur(data_dir)
@@ -16,7 +21,7 @@ def GetUtt2Dur(data_dir):
 
 def GetUtt2Uniq(data_dir):
     utt2uniq_file = '{0}/utt2uniq'.format(data_dir)
-    if not os.path.exists(utt2uniq):
+    if not os.path.exists(utt2uniq_file):
         return None, None
     utt2uniq = {}
     uniq2utt = {}
@@ -41,5 +46,15 @@ def GetNumFrames(data_dir, utts = None):
     return int(float(total_duration)/frame_shift)
 
 def CreateDataLinks(file_names):
-    RunKaldiCommand(" utils/create_data_link.pl {files}".format(" ".join(file_names)))
+    # if file_names already exist create_data_link.pl returns with code 1
+    # so we just delete them before calling create_data_link.pl
+    for file_name in file_names:
+        TryToDelete(file_name)
+    train_lib.RunKaldiCommand(" utils/create_data_link.pl {0}".format(" ".join(file_names)))
+
+def TryToDelete(file_name):
+    try:
+        os.remove(file_name)
+    except OSError:
+        pass
 
