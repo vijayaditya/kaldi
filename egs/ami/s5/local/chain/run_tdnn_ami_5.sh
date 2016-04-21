@@ -68,7 +68,7 @@ exp_name=tdnn_ami5
 # chain options
 frames_per_eg=150
 xent_regularize=0.1
-max_wer=
+max_wer=45
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging

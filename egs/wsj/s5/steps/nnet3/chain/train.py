@@ -595,8 +595,10 @@ def Train(args, run_opts):
         egs_dir = args.egs_dir
 
     num_archives = chain_lib.VerifyEgsDir(egs_dir, feat_dim, ivector_dim,
-                                  min_left_context, min_right_context,
-                                  max_left_context, max_right_context,
+                                  min_left_context + args.frame_subsampling_factor / 2,
+                                  min_right_context + args.frame_subsampling_factor / 2,
+                                  max_left_context + args.frame_subsampling_factor / 2,
+                                  max_right_context + args.frame_subsampling_factor / 2,
                                   args.chunk_widths)
     num_archives_expanded = num_archives * args.frame_subsampling_factor
 

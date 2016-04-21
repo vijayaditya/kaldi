@@ -131,10 +131,10 @@ if [ $stage -le 17 ]; then
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-widths="$chunk_widths" \
-    --egs.min-chunk-left-context 20 \
-    --egs.max-chunk-left-context 60 \
-    --egs.min-chunk-right-context 20 \
-    --egs.max-chunk-right-context 60 \
+    --egs.min-chunk-left-context 40 \
+    --egs.max-chunk-left-context 40 \
+    --egs.min-chunk-right-context 40 \
+    --egs.max-chunk-right-context 40 \
     --egs.dir "$common_egs_dir" \
     --cleanup.remove-egs true \
     --feat-dir $train_data_dir \
