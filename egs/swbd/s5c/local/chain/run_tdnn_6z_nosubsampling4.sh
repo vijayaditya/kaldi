@@ -15,7 +15,7 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/tdnn_6z_nosubsamp_100cw  # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/tdnn_6z_nosubsamp_100cw_lowreg  # Note: _sp will get added to this if $speed_perturb == true.
 decode_iter=
 
 # TDNN options
@@ -39,7 +39,7 @@ relu_dim=576
 frames_per_eg=100
 remove_egs=false
 common_egs_dir=exp/chain/tdnn_6z_nosubsamp_100cw_sp/egs
-xent_regularize=0.1
+xent_regularize=0.0333
 
 
 
