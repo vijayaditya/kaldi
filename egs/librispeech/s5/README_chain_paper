@@ -1,0 +1,16 @@
+1. Command for generating nnet3 libirspeech tdnn+CE results:
+
+./local/nnet3/run_tdnn.sh
+
+2. Command for further generating nnet3 libirspeech tdnn+CE+sMBR results based on tdnn+CE model:
+
+./local/nnet3/run_tdnn_discriminative.sh
+
+3. Command for generating nnet3 libirspeech tdnn+chain results
+
+./local/chain/run_tdnn_6z.sh
+
+4. Command for further generating nnet3 libirspeech tdnn+chain+sMBR results based on tdnn+chain model:
+
+./local/chain/run_tdnn_6z_discriminative.sh
+
