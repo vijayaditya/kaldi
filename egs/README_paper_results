@@ -1,0 +1,7 @@
+# This README is a guide to recreate the results of the experiments in the paper
+"Purely sequence-trained neural networks for ASR based on lattice-free MMI",
+ Daniel Povey, Vijayaditya Peddinti, Daniel Galvez, Pegah Ghahrmani, Vimal Manohar, Xingyu Na, Yiming Wang and Sanjeev Khudanpur,
+Proceedings of Interspeech 2016
+
+Please go through the following LVCSR task specific README files to reproduce
+the results corresponding to each LVCSR task.
