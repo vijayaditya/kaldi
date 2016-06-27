@@ -1,16 +1,16 @@
-1. Command for generating nnet3 libirspeech tdnn+CE results:
+1. Command for generating nnet3 libirspeech tdnn+CE results (Table 4, Column "CE" shows the result on decode_test_clean_fglarge):
 
 ./local/nnet3/run_tdnn.sh
 
-2. Command for further generating nnet3 libirspeech tdnn+CE+sMBR results based on tdnn+CE model:
+2. Command for further generating nnet3 libirspeech tdnn+CE+sMBR results based on tdnn+CE model (Table 4, Column "CE->sMBR" shows the result on decode_test_clean_fglarge):
 
 ./local/nnet3/run_tdnn_discriminative.sh
 
-3. Command for generating nnet3 libirspeech tdnn+chain results
+3. Command for generating nnet3 libirspeech tdnn+chain results (Table 4, Column "LF-MMI" shows the result on decode_test_clean_fglarge)
 
 ./local/chain/run_tdnn_6z.sh
 
-4. Command for further generating nnet3 libirspeech tdnn+chain+sMBR results based on tdnn+chain model:
+4. Command for further generating nnet3 libirspeech tdnn+chain+sMBR results based on tdnn+chain model (Not shown in the paper):
 
 ./local/chain/run_tdnn_6z_discriminative.sh
 
