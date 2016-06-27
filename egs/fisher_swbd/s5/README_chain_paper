@@ -1,0 +1,11 @@
+1. Command for generating Fisher+SWBD TDNN CE results (Table 4):
+./local/nnet3/run_tdnn.sh
+
+2. Command for generating Fisher+SWBD TDNN CE+sMBR results (Table 4):
+./local/nnet3/run_tdnn_discriminative.sh
+
+3. Command for generating Fisher+SWBD TDNN LF-MMI results (Table 4 and Table 5):
+./local/chain/run_tdnn_7b.sh
+
+4. Command for generating Fisher+SWBD BLSTM LF-MMI results (Table 5):
+./local/chain/run_blstm_6h.sh
