@@ -424,9 +424,9 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
             raise Exception('Exception while reading the random seed for training')
         if srand != saved_srand:
             logger.warning("The random seed provided to this iteration (srand={0}) is different from the one saved last time (srand={1}). Using srand={0}.".format(srand, saved_srand))
-    else: 
-        f = open('{0}/srand'.format(dir), 'w')                              
-        f.write(str(srand))                                                      
+    else:
+        f = open('{0}/srand'.format(dir), 'w')
+        f.write(str(srand))
         f.close()
 
     chain_lib.ComputeTrainCvProbabilities(dir, iter, egs_dir,

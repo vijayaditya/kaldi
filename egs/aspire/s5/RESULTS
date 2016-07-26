@@ -29,8 +29,9 @@ for x in exp/*/decode_dev; do grep WER $x/wer_* | utils/best_wer.sh; done
 # Results on ASpIRE dev data using nnet3 scripts
 # local/chain/run_tdnn_7b.sh
 %WER 27.8 | 2120 27217 | 78.2 13.6 8.2 6.0 27.8 75.9 | -0.613 | exp/chain/tdnn_7b/decode_dev_aspire_whole_uniformsegmented_win10_over5_v6_200jobs_iterfinal_pp_fg/score_9/penalty_0.0/ctm.filt.filt.sys
+#Total training time is 4 days, 4:17:26
 
 # local/nnet3/run_tdnn.sh
 %WER 31.0 | 2120 27217 | 74.8 16.1 9.1 5.9 31.0 77.9 | -0.707 | exp/nnet3/tdnn/decode_dev_aspire_whole_uniformsegmented_win10_over5_v6_200jobs_iterfinal_pp_fg/score_14/penalty_0.0/ctm.filt.filt.sys
-
+#Total training time is 2 days, 21:24:30
 

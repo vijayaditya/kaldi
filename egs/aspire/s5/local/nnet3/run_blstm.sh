@@ -4,11 +4,11 @@
 # it is based on blstm used in fisher_swbd recipe
 
 stage=7
-affix=bidirectional
+affix=bidirectional_sf
 train_stage=-10
 egs_stage=0
-common_egs_dir=
-remove_egs=true
+common_egs_dir=exp/nnet3/lstm_bidirectional/egs
+remove_egs=false
 
 . ./cmd.sh
 . ./path.sh
