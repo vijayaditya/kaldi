@@ -463,6 +463,12 @@ int32 Nnet::GetComponentIndex(const std::string &component_name) const {
   return -1;
 }
 
+void Nnet::GetOutputNodeIndexes(std::vector<int32>* output_nodes) const {
+  int32 size = nodes_.size();
+  for (int32 i = 0; i < size; i++)
+    if (IsOutputNode(i))
+      output_nodes->push_back(i);
+}
 
 // note: the input to this function is a config generated from the nnet,
 // containing the node info, concatenated with a config provided by the user.

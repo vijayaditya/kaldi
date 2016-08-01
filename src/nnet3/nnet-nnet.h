@@ -161,6 +161,9 @@ class Nnet {
   /// and is not directly followed by a node of type kComponent.
   bool IsOutputNode(int32 node) const;
 
+  /// Returns the output nodes
+  void GetOutputNodeIndexes(std::vector<int32>* output_nodes) const;
+
   /// Returns true if this is component-input node, i.e. a node of type kDescriptor
   /// that immediately precedes a node of type kComponent.
   bool IsComponentInputNode(int32 node) const;
