@@ -25,6 +25,63 @@ def GetSumDescriptor(inputs):
         sum_descriptors = cur_sum_descriptors
     return sum_descriptors
 
+def AddSeparatedInputLayers(config_lines, num_streams, feat_dim,
+                            splice_indexes = [0], ivector_dim = 0):
+
+    assert(feat_dim % num_streams == 0)
+    assert(ivector_dim % num_streams == 0)
+
+    components.append('input-node name=input dim=' + str(feat_dim))
+    total_input = {'descriptor' : 'input',
+                   'dimension' : feat_dim}
+
+    total_ivector = {}
+    if ivector_dim > 0:
+        components.append('input-node name=ivector dim=' + str(ivector_dim))
+        total_ivector = {'descriptor' : 'ReplaceIndex(ivector, t, 0)',
+                         'dimension' : ivector_dim}
+
+    separated_spliced_inputs = []
+    single_feat_dim = feat_dim / num_streams
+    single_ivector_dim = ivector_dim / num_streams
+    for i in range(num_streams):
+        single_output_dim = 0
+        inputs.append(nodes.AddDimRangeNode(config_lines,
+                                            'Input{0}'.format(i),
+                                            total_input,
+                                            single_feat_dim * i,
+                                            single_feat_dim)
+        list = [('Offset(input, {0})'.format(n) if n != 0 else 'input') for n in splice_indexes]
+        if len(list) > 1:
+            splice_descriptor = "Append({0})".format(", ".join(list))
+        else:
+            splice_descriptor = list[0]
+
+        single_output_dim += len(splice_indexes) * single_feat_dim
+        if ivector_dim > 0:
+            single_ivector = nodes.AddDimRangeNode(config_lines,
+                                                  'Ivector{0}'.format(i),
+                                                   total_ivector,
+                                                   single_ivector_dim * i,
+                                                   single_ivector_dim)
+            splice_descriptor = "Append({0}, {1})".format(splice_descriptor,
+                                                          single_ivector['descriptor'])
+            single_output_dim += single_ivector_dim
+        separated_spliced_inputs.append({'descriptor' : splice_descriptor,
+                                         'dimension'  : single_output_dim})
+
+    return separated_spliced_inputs
+
+def AddLsrLayer(config_lines, name, inputs, main_stream):
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+
+    input_indexes = range(len(inputs))
+    input_indexes.remove(main_stream)
+    for i in input_indexes:
+
+
+
 # adds the input nodes and returns the descriptor
 def AddInputLayer(config_lines, feat_dim, splice_indexes=[0], ivector_dim=0):
     components = config_lines['components']
@@ -55,19 +112,27 @@ def AddNoOpLayer(config_lines, name, input):
     return {'descriptor':  '{0}_noop'.format(name),
             'dimension': input['dimension']}
 
-def AddLdaLayer(config_lines, name, input, lda_file):
-    return AddFixedAffineLayer(config_lines, name, input, lda_file)
+def AddLdaLayer(config_lines, name, inputs, lda_file):
+    return AddFixedAffineLayer(config_lines, name, inputs, lda_file)
 
-def AddFixedAffineLayer(config_lines, name, input, matrix_file):
+def AddFixedAffineLayer(config_lines, name, inputs, matrix_file):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
 
     components.append('component name={0}_fixaffine type=FixedAffineComponent matrix={1}'.format(name, matrix_file))
-    component_nodes.append('component-node name={0}_fixaffine component={0}_fixaffine input={1}'.format(name, input['descriptor']))
+    for i in range(inputs):
+        component_nodes.append('component-node name={0}_fixaffine_{1} component={0}_fixaffine input={2}'.format(name, i, inputs[i]['descriptor']))
+        outputs.append({'descriptor':  '{0}_fixaffine_{1}'.format(name,i),
+                        'dimension': inputs[i]['dimension']})
+    return outputs
 
-    return {'descriptor':  '{0}_fixaffine'.format(name),
-            'dimension': input['dimension']}
+def AddDimRangeNode(config_lines, name, input, dim_offset, dim):
+    assert(input['dimension'] >= dim)
+    component_nodes = config_lines['component-nodes']
+    component_nodes.append("dim-range-node name={0} input-node={1}_dim_range dim-offset={2} dim={3}".format(name = name, input['descriptor'], dim_offset, dim))
 
+    return {'descriptor': '{0}_dim_range'.format(name),
+            'dimension': dim }
 
 def AddBlockAffineLayer(config_lines, name, input, output_dim, num_blocks):
     components = config_lines['components']
@@ -100,22 +165,24 @@ def AddAffineLayer(config_lines, name, input, output_dim, ng_affine_options = ""
     return {'descriptor':  '{0}_affine'.format(name),
             'dimension': output_dim}
 
-def AddAffRelNormLayer(config_lines, name, input, output_dim, ng_affine_options = " bias-stddev=0 ", norm_target_rms = 1.0, self_repair_scale = None):
+def AddAffRelNormLayer(config_lines, name, inputs, output_dim, ng_affine_options = " bias-stddev=0 ", norm_target_rms = 1.0, self_repair_scale = None):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
 
     # self_repair_scale is a constant scaling the self-repair vector computed in RectifiedLinearComponent
     self_repair_string = "self-repair-scale={0:.10f}".format(self_repair_scale) if self_repair_scale is not None else ''
-    components.append("component name={0}_affine type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, input['dimension'], output_dim, ng_affine_options))
+    components.append("component name={0}_affine type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, inputs[0]['dimension'], output_dim, ng_affine_options))
     components.append("component name={0}_relu type=RectifiedLinearComponent dim={1} {2}".format(name, output_dim, self_repair_string))
     components.append("component name={0}_renorm type=NormalizeComponent dim={1} target-rms={2}".format(name, output_dim, norm_target_rms))
 
-    component_nodes.append("component-node name={0}_affine component={0}_affine input={1}".format(name, input['descriptor']))
-    component_nodes.append("component-node name={0}_relu component={0}_relu input={0}_affine".format(name))
-    component_nodes.append("component-node name={0}_renorm component={0}_renorm input={0}_relu".format(name))
+    for i in range(len(inputs)):
+        component_nodes.append("component-node name={0}_affine_{1} component={0}_affine input={2}".format(name, i+1, inputs[0]['descriptor']))
+        component_nodes.append("component-node name={0}_relu_{1} component={0}_relu input={0}_affine_{1}".format(name, i+1))
+        component_nodes.append("component-node name={0}_renorm_{1} component={0}_renorm_{1} input={0}_relu_{1}".format(name, i+1))
 
-    return {'descriptor':  '{0}_renorm'.format(name),
-            'dimension': output_dim}
+        outputs.append({'descriptor':  '{0}_renorm_{1}'.format(name,i+1),
+                'dimension': output_dim})
+    return outputs
 
 def AddAffPnormLayer(config_lines, name, input, pnorm_input_dim, pnorm_output_dim, ng_affine_options = " bias-stddev=0 ", norm_target_rms = 1.0):
     components = config_lines['components']
@@ -255,7 +322,7 @@ def AddFinalLayer(config_lines, input, output_dim,
     component_nodes = config_lines['component-nodes']
 
     if name_affix is not None:
-        final_node_prefix = 'Final-' + str(name_affix)
+        final_node_prefix = 'Final_' + str(name_affix)
     else:
         final_node_prefix = 'Final'
 
@@ -448,4 +515,4 @@ def AddBLstmLayer(config_lines,
             'descriptor': output_descriptor,
             'dimension':output_dim
             }
- 
+
