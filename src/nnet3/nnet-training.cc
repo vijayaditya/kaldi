@@ -96,9 +96,10 @@ void NnetTrainer::Train(const NnetExample &eg) {
   }
 }
 
+// Compute the objective function, if specified,
+// for the output_nodes
 void NnetTrainer::ProcessOutputs(const NnetExample &eg,
                                  NnetComputer *computer) {
-
   std::vector<int32> output_node_indexes;
   nnet_->GetOutputNodeIndexes(&output_node_indexes);
   std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
@@ -109,23 +110,26 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
     KALDI_ASSERT(node_index >= 0);
     if (nnet_->IsOutputNode(node_index)) {
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type;
-      BaseFloat tot_weight, tot_objf;
-      bool supply_deriv = true;
-      ComputeObjectiveFunction(io.features, obj_type, io.name,
-                               supply_deriv, computer,
-                               &tot_weight, &tot_objf);
-      objf_info_[io.name].UpdateStats(io.name, config_.print_interval,
-                                      num_minibatches_processed_++,
-                                      tot_weight, tot_objf);
-      std::vector<int32>::iterator found_output_index =
-          std::find(output_node_indexes.begin(), output_node_indexes.end(),
-                    node_index);
-      if (found_output_index != output_node_indexes.end())
-        output_node_indexes.erase(found_output_index);
+      if (obj_type != kNone)  {
+        BaseFloat tot_weight, tot_objf;
+        bool supply_deriv = true;
+        ComputeObjectiveFunction(io.features, obj_type, io.name,
+                                 supply_deriv, computer,
+                                 &tot_weight, &tot_objf);
+        objf_info_[io.name].UpdateStats(io.name, config_.print_interval,
+                                        num_minibatches_processed_++,
+                                        tot_weight, tot_objf);
+        std::vector<int32>::iterator found_output_index =
+            std::find(output_node_indexes.begin(), output_node_indexes.end(),
+                      node_index);
+        if (found_output_index != output_node_indexes.end())
+          output_node_indexes.erase(found_output_index);
+      }
     }
   }
 
   // Computing the objfn for output nodes which do not have supervision
+  // but have an objective specified
   for (size_t i = 0; i < output_node_indexes.size(); i++) {
     int32 node_index = output_node_indexes[i];
     const std::string node_name = nnet_->GetNodeName(node_index);
@@ -133,18 +137,17 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
     KALDI_ASSERT(nnet_->IsOutputNode(node_index));
     ObjectiveType obj_type =
         nnet_->GetNode(node_index).u.objective_type;
-    BaseFloat tot_weight, tot_objf;
-    bool supply_deriv = true;
-    ComputeObjectiveFunction(obj_type, node_name,
-                             supply_deriv, computer,
-                             &tot_weight, &tot_objf);
-    objf_info_[node_name].UpdateStats(node_name, config_.print_interval,
-                                    num_minibatches_processed_++,
-                                    tot_weight, tot_objf);
-
-
+    if (obj_type != kNone)  {
+      BaseFloat tot_weight, tot_objf;
+      bool supply_deriv = true;
+      ComputeObjectiveFunction(obj_type, node_name,
+                               supply_deriv, computer,
+                               &tot_weight, &tot_objf);
+      objf_info_[node_name].UpdateStats(node_name, config_.print_interval,
+                                      num_minibatches_processed_++,
+                                      tot_weight, tot_objf);
+    }
   }
-
 }
 
 bool NnetTrainer::PrintTotalStats() const {

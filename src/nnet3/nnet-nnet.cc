@@ -73,8 +73,20 @@ std::string Nnet::GetAsConfigLine(int32 node_index, bool include_dim) const {
       node.descriptor.WriteConfig(ans, node_names_);
       if (include_dim)
         ans << " dim=" << node.Dim(*this);
-      ans << " objective=" << (node.u.objective_type == kLinear ? "linear" :
-                               "quadratic");
+      ans << " objective=";
+      switch (node.u.objective_type)  {
+        case kNoObj:
+          ans << "none";
+          break;
+        case kLinear:
+          ans << "linear";
+          break;
+        case kQuadratic:
+          ans << "quadratic";
+          break;
+        default:
+          KALDI_ERR << "Unknown objective type";
+      }
       break;
     case kComponent:
       ans << "component-node name=" << name << " component="
@@ -381,7 +393,9 @@ void Nnet::ProcessOutputNodeConfigLine(
                 << config->WholeLine();
     std::string objective_type;
     if (config->GetValue("objective", &objective_type)) {
-      if (objective_type == "linear") {
+      if (objective_type == "none") {
+        nodes_[node_index].u.objective_type = kNoObj;
+      } else if (objective_type == "linear") {
         nodes_[node_index].u.objective_type = kLinear;
       } else if (objective_type == "quadratic") {
         nodes_[node_index].u.objective_type = kQuadratic;
