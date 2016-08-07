@@ -283,6 +283,7 @@ def TrainNewModels(dir, iter, srand, num_jobs, num_archives_processed, num_archi
                    left_context, right_context,
                    momentum, max_param_change,
                    shuffle_buffer_size, minibatch_size,
+                   pseudo_sup_nodes,
                    run_opts):
       # We cannot easily use a single parallel SGE job to do the main training,
       # because the computation of which archive and which --frame option
@@ -292,6 +293,10 @@ def TrainNewModels(dir, iter, srand, num_jobs, num_archives_processed, num_archi
 
     context_opts="--left-context={0} --right-context={1}".format(
                   left_context, right_context)
+    add_pseudo_sup_command = ''
+    if pseudo_sup_nodes:
+        pseudo_sup_node_string = ','.join(pseudo_sup_nodes)
+        add_pseudo_sup_command = "nnet3-add-pseudo-supervision {nodes} {model} ark:- ark:- |"
     processes = []
     for job in range(1,num_jobs+1):
         k = num_archives_processed + job - 1 # k is a zero-based index that we will derive
@@ -304,7 +309,7 @@ def TrainNewModels(dir, iter, srand, num_jobs, num_archives_processed, num_archi
   --print-interval=10 --momentum={momentum} \
   --max-param-change={max_param_change} \
   "{raw_model}" \
-  "ark,bg:nnet3-copy-egs --frame={frame} {context_opts} ark:{egs_dir}/egs.{archive_index}.ark ark:- | nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} --srand={srand} ark:- ark:-| nnet3-merge-egs --minibatch-size={minibatch_size} --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \
+  "ark,bg:nnet3-copy-egs --frame={frame} {context_opts} ark:{egs_dir}/egs.{archive_index}.ark ark:- | {pseudo_sup_command} nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} --srand={srand} ark:- ark:-| nnet3-merge-egs --minibatch-size={minibatch_size} --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \
   {dir}/{next_iter}.{job}.raw
           """.format(command = run_opts.command,
                      train_queue_opt = run_opts.train_queue_opt,
@@ -315,6 +320,7 @@ def TrainNewModels(dir, iter, srand, num_jobs, num_archives_processed, num_archi
                      raw_model = raw_model_string, context_opts = context_opts,
                      egs_dir = egs_dir, archive_index = archive_index,
                      shuffle_buffer_size = shuffle_buffer_size,
+                     pseudo_sup_command = add_pseudo_sup_command,
                      minibatch_size = minibatch_size),
           wait = False)
 
@@ -338,15 +344,13 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
                       frames_per_eg, num_hidden_layers, add_layers_period,
                       left_context, right_context,
                       momentum, max_param_change, shuffle_buffer_size,
-                      run_opts):
-
-
+                      add_pseudo_supervision, run_opts):
 
     # Set off jobs doing some diagnostics, in the background.
     # Use the egs dir from the previous iteration for the diagnostics
     logger.info("Training neural net (pass {0})".format(iter))
 
-    # check if different iterations use the same random seed 
+    # check if different iterations use the same random seed
     if os.path.exists('{0}/srand'.format(dir)):
         try:
             saved_srand = int(open('{0}/srand'.format(dir), 'r').readline().strip())
@@ -354,9 +358,9 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
             raise Exception('Exception while reading the random seed for training')
         if srand != saved_srand:
             logger.warning("The random seed provided to this iteration (srand={0}) is different from the one saved last time (srand={1}). Using srand={0}.".format(srand, saved_srand))
-    else: 
-        f = open('{0}/srand'.format(dir), 'w')                              
-        f.write(str(srand))                                                      
+    else:
+        f = open('{0}/srand'.format(dir), 'w')
+        f.write(str(srand))
         f.close()
 
     ComputeTrainCvProbabilities(dir, iter, egs_dir, run_opts)
@@ -370,6 +374,16 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
                            # best.
         cur_num_hidden_layers = 1 + iter / add_layers_period
         config_file = "{0}/configs/layer{1}.config".format(dir, cur_num_hidden_layers)
+        pseudo_sup_nodes = []
+        if add_pseudo_supervision:
+            pseudo_sup_file = "{0}/configs/pseudo_sup_nodes_{1}.txt".format(dir, cur_num_hidden_layers)
+            try:
+                pseudo_sup_nodes = map(lambda x: x.strip(), open(pseudo_sup_file).readlines.split(","))
+                if len(pseudo_sup_nodes) == 0:
+                    raise Exception("--add-pseudo-supervision was True, but there are no nodes specified in {0} file.".format(pseudo_sup_file))
+            except IOError:
+                raise Exception("--add-pseudo-supervision was True, but there is no {0}.".format(pseudo_sup_file))
+
         raw_model_string = "nnet3-am-copy --raw=true --learning-rate={lr} {dir}/{iter}.mdl - | nnet3-init --srand={srand} - {config} - |".format(lr=learning_rate, dir=dir, iter=iter, srand=iter + srand, config=config_file )
     else:
         do_average = True
@@ -399,7 +413,7 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
                    left_context, right_context,
                    momentum, max_param_change,
                    shuffle_buffer_size, cur_minibatch_size,
-                   run_opts)
+                   pseudo_sup_nodes, run_opts)
     [models_to_average, best_model] = GetSuccessfulModels(num_jobs, '{0}/log/train.{1}.%.log'.format(dir,iter))
     nnets_list = []
     for n in models_to_average:
@@ -585,7 +599,8 @@ def Train(args, run_opts):
                               num_hidden_layers, args.add_layers_period,
                               left_context, right_context,
                               args.momentum, args.max_param_change,
-                              args.shuffle_buffer_size, run_opts)
+                              args.shuffle_buffer_size, args.add_pseudo_supervision,
+                              run_opts)
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain conditions
                 RemoveModel(args.dir, iter-2, num_iters, num_iters_combine,

@@ -105,7 +105,6 @@ int main(int argc, char *argv[]) {
       }
 
       for (size_t i = 0; i < split_string.size(); i++)  {
-        KALDI_LOG << "aaaaaaaaaaaaaaaaaa" << output_dims[i];
         SparseMatrix<BaseFloat> pseudo_output_features(t_size, output_dims[i]);
         NnetIo pseudo_output(split_string[i],
                              t_begin, pseudo_output_features);

@@ -205,12 +205,47 @@ def ParseModelConfigVarsFile(var_file):
 
     raise Exception('Error while parsing the file {0}'.format(var_file))
 
-
 def GenerateEgs(data, alidir, egs_dir,
                 left_context, right_context,
                 valid_left_context, valid_right_context,
                 run_opts, stage = 0,
                 feat_type = 'raw', online_ivector_dir = None,
+                samples_per_iter = 20000, frames_per_eg = 20, srand = 0,
+                egs_opts = None, cmvn_opts = None, transform_dir = None):
+
+    RunKaldiCommand("""
+steps/nnet3/get_egs.sh {egs_opts} \
+  --cmd "{command}" \
+  --cmvn-opts "{cmvn_opts}" \
+  --feat-type {feat_type} \
+  --transform-dir "{transform_dir}" \
+  --online-ivector-dir "{ivector_dir}" \
+  --left-context {left_context} --right-context {right_context} \
+  --valid-left-context {valid_left_context} \
+  --valid-right-context {valid_right_context} \
+  --stage {stage} \
+  --samples-per-iter {samples_per_iter} \
+  --frames-per-eg {frames_per_eg} \
+  --srand {srand} \
+  {data} {alidir} {egs_dir}
+      """.format(command = run_opts.command,
+          cmvn_opts = cmvn_opts if cmvn_opts is not None else '',
+          feat_type = feat_type,
+          transform_dir = transform_dir if transform_dir is not None else '',
+          ivector_dir = online_ivector_dir if online_ivector_dir is not None else '',
+          left_context = left_context, right_context = right_context,
+          valid_left_context = valid_left_context,
+          valid_right_context = valid_right_context,
+          stage = stage, samples_per_iter = samples_per_iter,
+          frames_per_eg = frames_per_eg, srand = srand, data = data, alidir = alidir,
+          egs_dir = egs_dir,
+          egs_opts = egs_opts if egs_opts is not None else '' ))
+
+def GenerateLsrEgs(data_dirs, alidir, egs_dir,
+                left_context, right_context,
+                valid_left_context, valid_right_context,
+                run_opts, stage = 0,
+                feat_type = 'raw', online_ivector_dirs = None,
                 samples_per_iter = 20000, frames_per_eg = 20, srand = 0,
                 egs_opts = None, cmvn_opts = None, transform_dir = None):
 

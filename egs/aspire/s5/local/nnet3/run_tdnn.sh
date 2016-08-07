@@ -25,7 +25,7 @@ EOF
 fi
 
 # do the common parts of the script.
-local/nnet3/run_ivector_common.sh --stage $stage || exit 1;
+local/lsr/run_ivector_common.sh --stage $stage || exit 1;
 
 ali_dir=exp/tri5a_rvb_ali
 dir=exp/nnet3/tdnn

@@ -1035,7 +1035,7 @@ class ClipGradientComponent: public Component {
   BaseFloat self_repair_scale_;  // constant scaling the self-repair vector
   std::string debug_info_;   // component-node name, used in the destructor to
                              // print out stats of self-repair
-  
+
   // this function is called from Backprop code, and only does something if the
   // self-repair-scale config value is set and the current clipped proportion
   // exceeds the threshold. What it does is to add a term to in-deriv that

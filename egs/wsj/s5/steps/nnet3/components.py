@@ -28,6 +28,8 @@ def GetSumDescriptor(inputs):
 def AddSeparatedInputLayers(config_lines, num_streams, feat_dim,
                             splice_indexes = [0], ivector_dim = 0):
 
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
     assert(feat_dim % num_streams == 0)
     assert(ivector_dim % num_streams == 0)
 
@@ -40,18 +42,21 @@ def AddSeparatedInputLayers(config_lines, num_streams, feat_dim,
         components.append('input-node name=ivector dim=' + str(ivector_dim))
         total_ivector = {'descriptor' : 'ReplaceIndex(ivector, t, 0)',
                          'dimension' : ivector_dim}
+        total_ivector = AddNoOpLayer(config_lines, 'ivector_copy', total_ivector)
 
     separated_spliced_inputs = []
     single_feat_dim = feat_dim / num_streams
     single_ivector_dim = ivector_dim / num_streams
+    inputs = []
     for i in range(num_streams):
         single_output_dim = 0
-        inputs.append(nodes.AddDimRangeNode(config_lines,
+        inputs.append(AddDimRangeNode(config_lines,
                                             'Input{0}'.format(i),
                                             total_input,
                                             single_feat_dim * i,
-                                            single_feat_dim)
-        list = [('Offset(input, {0})'.format(n) if n != 0 else 'input') for n in splice_indexes]
+                                            single_feat_dim))
+        input_descriptor = inputs[-1]['descriptor']
+        list = [('Offset({0}, {1})'.format(input_descriptor, n) if n != 0 else input_descriptor) for n in splice_indexes]
         if len(list) > 1:
             splice_descriptor = "Append({0})".format(", ".join(list))
         else:
@@ -59,7 +64,7 @@ def AddSeparatedInputLayers(config_lines, num_streams, feat_dim,
 
         single_output_dim += len(splice_indexes) * single_feat_dim
         if ivector_dim > 0:
-            single_ivector = nodes.AddDimRangeNode(config_lines,
+            single_ivector = AddDimRangeNode(config_lines,
                                                   'Ivector{0}'.format(i),
                                                    total_ivector,
                                                    single_ivector_dim * i,
@@ -72,15 +77,44 @@ def AddSeparatedInputLayers(config_lines, num_streams, feat_dim,
 
     return separated_spliced_inputs
 
-def AddLsrLayer(config_lines, name, inputs, main_stream):
+def AddFixedScaleLayer(config_lines, name, input, scale_vector_file):
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+
+    components.append('component name={0}_fixed_scale type=FixedScaleComponent scales={1}'.format(name, scale_vector_file))
+    component_nodes.append('component-node name={0}_fixed_scale component={0}_fixed_scale input={1}'.format(name, input['descriptor']))
+
+    return  { 'descriptor' : '{0}_fixed_scale'.format(name),
+              'dimension' : input['dimension']}
+
+def AddLsrLayer(config_lines, name, inputs, main_stream, scale_file_prefix):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
 
     input_indexes = range(len(inputs))
     input_indexes.remove(main_stream)
+
+    scale_string = "[ {0} ]".format(" ".join(map(lambda x: str(x), [-1 ] * inputs[main_stream]['dimension'])))
+    f = open(scale_file_prefix+"_minus1.vec", 'w')
+    f.write(scale_string)
+    f.close()
+
+    scaled_main_stream = AddFixedScaleLayer(config_lines, name, inputs[main_stream], scale_file_prefix+"_minus1.vec")
+    output_dim = scaled_main_stream['dimension']
+    output_nodes = []
     for i in input_indexes:
+        scale_string = "[ {0} ]".format(" ".join(map(lambda x: str(x), [1.0 / output_dim ] * output_dim)))
+        inv_dim_scale_file = scale_file_prefix+"_1by{0}.vec".format(int(output_dim))
+        f = open(inv_dim_scale_file, 'w')
+        f.write(scale_string)
+        f.close()
+        current_difference = {'descriptor' : "Sum({0},{1})".format(inputs[i]['descriptor'], scaled_main_stream['descriptor']),
+                              'dimension' : scaled_main_stream['dimension']}
+        scaled_difference = AddFixedScaleLayer(config_lines, '{0}_{1}'.format(name,i), current_difference, inv_dim_scale_file)
 
-
+        component_nodes.append('output-node name=output_{0}_{1} input={2} objective=quadratic'.format(name, i, scaled_difference['descriptor']))
+        output_nodes.append('output_{0}_{1}'.format(name, i))
+    return output_nodes
 
 # adds the input nodes and returns the descriptor
 def AddInputLayer(config_lines, feat_dim, splice_indexes=[0], ivector_dim=0):
@@ -120,7 +154,8 @@ def AddFixedAffineLayer(config_lines, name, inputs, matrix_file):
     component_nodes = config_lines['component-nodes']
 
     components.append('component name={0}_fixaffine type=FixedAffineComponent matrix={1}'.format(name, matrix_file))
-    for i in range(inputs):
+    outputs = []
+    for i in range(len(inputs)):
         component_nodes.append('component-node name={0}_fixaffine_{1} component={0}_fixaffine input={2}'.format(name, i, inputs[i]['descriptor']))
         outputs.append({'descriptor':  '{0}_fixaffine_{1}'.format(name,i),
                         'dimension': inputs[i]['dimension']})
@@ -129,7 +164,7 @@ def AddFixedAffineLayer(config_lines, name, inputs, matrix_file):
 def AddDimRangeNode(config_lines, name, input, dim_offset, dim):
     assert(input['dimension'] >= dim)
     component_nodes = config_lines['component-nodes']
-    component_nodes.append("dim-range-node name={0} input-node={1}_dim_range dim-offset={2} dim={3}".format(name = name, input['descriptor'], dim_offset, dim))
+    component_nodes.append("dim-range-node name={0}_dim_range input-node={1} dim-offset={2} dim={3}".format(name, input['descriptor'], dim_offset, dim))
 
     return {'descriptor': '{0}_dim_range'.format(name),
             'dimension': dim }
@@ -175,10 +210,11 @@ def AddAffRelNormLayer(config_lines, name, inputs, output_dim, ng_affine_options
     components.append("component name={0}_relu type=RectifiedLinearComponent dim={1} {2}".format(name, output_dim, self_repair_string))
     components.append("component name={0}_renorm type=NormalizeComponent dim={1} target-rms={2}".format(name, output_dim, norm_target_rms))
 
+    outputs = []
     for i in range(len(inputs)):
         component_nodes.append("component-node name={0}_affine_{1} component={0}_affine input={2}".format(name, i+1, inputs[0]['descriptor']))
         component_nodes.append("component-node name={0}_relu_{1} component={0}_relu input={0}_affine_{1}".format(name, i+1))
-        component_nodes.append("component-node name={0}_renorm_{1} component={0}_renorm_{1} input={0}_relu_{1}".format(name, i+1))
+        component_nodes.append("component-node name={0}_renorm_{1} component={0}_renorm input={0}_relu_{1}".format(name, i+1))
 
         outputs.append({'descriptor':  '{0}_renorm_{1}'.format(name,i+1),
                 'dimension': output_dim})

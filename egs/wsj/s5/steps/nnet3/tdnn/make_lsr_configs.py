@@ -10,6 +10,7 @@ import warnings
 import copy
 import imp
 import ast
+import pprint
 
 nodes = imp.load_source('', 'steps/nnet3/components.py')
 nnet3_train_lib = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
@@ -45,7 +46,8 @@ def GetArgs():
                                   help="directory with final.mdl, from which we derive the num-targets")
 
     parser.add_argument("--num-streams", type=int, default=1, dest="num_streams")
-    parser.add_argument("--main-stream", type=int, default=0, dest="feature stream for which xent cost is computed")
+    parser.add_argument("--main-stream", type=int, default=0,
+                        help = "feature stream for which xent cost is computed")
 
     # General neural network options
     parser.add_argument("--splice-indexes", type=str, required = True,
@@ -56,7 +58,8 @@ def GetArgs():
     parser.add_argument("--relu-dim", type=int,
                         help="dimension of ReLU nonlinearities")
     parser.add_argument("--self-repair-scale-nonlinearity", type=float,
-                        help="A non-zero value activates the self-repair mechanism in the non-linearities", default=None)
+                        help="A non-zero value activates the self-repair mechanism in the non-linearities",
+                        default=None)
     parser.add_argument("--use-presoftmax-prior-scale", type=str, action=nnet3_train_lib.StrToBoolAction,
                         help="if true, a presoftmax-prior-scale is added",
                         choices=['true', 'false'], default = True)
@@ -157,7 +160,7 @@ def MakeConfigs(config_dir, num_streams, main_stream, splice_indexes_string,
                 feat_dim, ivector_dim, num_targets, relu_dim,
                 use_presoftmax_prior_scale,
                 final_layer_normalize_target,
-                self_repair_scale):
+                self_repair_scale_nonlinearity):
 
     parsed_splice_output = ParseSpliceString(splice_indexes_string.strip())
 
@@ -171,22 +174,27 @@ def MakeConfigs(config_dir, num_streams, main_stream, splice_indexes_string,
     config_lines = {'components':[], 'component-nodes':[]}
 
     config_files={}
+    lsr_node_files={}
 
     inputs = []
     if num_streams > 1:
         # the input has num_streams different feature streams
         # concatenated. The ivector is also assumed to be a concatenation
         # of num_streams different ivectors
-        inputs = AddSeperatedInputLayers(config_lines, feat_dim, splice_indexes[0], ivector_dim)
+        inputs = nodes.AddSeparatedInputLayers(config_lines, num_streams, feat_dim, splice_indexes[0], ivector_dim)
     else:
         inputs.append(nodes.AddInputLayer(config_lines, feat_dim, splice_indexes[0], ivector_dim))
+        init_input = inputs[0]
 
     # Add the init config lines for estimating the preconditioning matrices
-    # add it for only one stream as we will use this matrix for all the streams
-    init_config_lines = copy.deepcopy(config_lines)
+    # This preconditioning matrix will be shared across all the streams
+    # Further it will be estimated using data sampled from all the streams
+    # so it will be used from a separate directory
+    init_config_lines = {'components':[], 'component-nodes':[]}
     init_config_lines['components'].insert(0, '# Config file for initializing neural network prior to')
     init_config_lines['components'].insert(0, '# preconditioning matrix computation')
-    nodes.AddOutputLayer(init_config_lines, inputs[0])
+    init_input = nodes.AddInputLayer(init_config_lines, feat_dim / num_streams, splice_indexes[0], ivector_dim / num_streams)
+    nodes.AddOutputLayer(init_config_lines, init_input)
     config_files[config_dir + '/init.config'] = init_config_lines
 
     prev_layer_outputs = nodes.AddLdaLayer(config_lines, "L0",
@@ -197,6 +205,8 @@ def MakeConfigs(config_dir, num_streams, main_stream, splice_indexes_string,
     # we moved the first splice layer to before the LDA..
     # so the input to the first affine layer is going to [0] index
     splice_indexes[0] = [0]
+
+    lsr_output_nodes = []
 
     for i in range(0, num_hidden_layers):
         # make the intermediate config file for layerwise discriminative training
@@ -215,7 +225,9 @@ def MakeConfigs(config_dir, num_streams, main_stream, splice_indexes_string,
 
         if len(prev_layer_outputs) > 1:
             #LSR can be computed
-            nodes.AddLsrLayer(config_lines, "LSR_{0}".format(i), prev_layer_outputs, main_stream)
+            lsr_output_nodes += nodes.AddLsrLayer(config_lines, "LSR_{0}".format(i),
+                                                  prev_layer_outputs, main_stream,
+                                                  '{0}/lsr_{1}'.format(config_dir,i))
 
         # a final layer is added after each new layer as we are generating
         # configs for layer-wise discriminative training
@@ -224,7 +236,10 @@ def MakeConfigs(config_dir, num_streams, main_stream, splice_indexes_string,
                            prior_scale_file = prior_scale_file)
 
         config_files['{0}/layer{1}.config'.format(config_dir, i+1)] = config_lines
+        lsr_node_files['{0}/pseudo_sup_nodes_{1}.txt'.format(config_dir, i+1)] = copy.deepcopy(lsr_output_nodes)
         config_lines = {'components':[], 'component-nodes':[]}
+
+    lsr_node_files['{0}/pseudo_sup_nodes.txt'.format(config_dir, i+1)] = lsr_output_nodes
 
     left_context += int(parsed_splice_output['left_context'])
     right_context += int(parsed_splice_output['right_context'])
@@ -235,7 +250,7 @@ def MakeConfigs(config_dir, num_streams, main_stream, splice_indexes_string,
     print('model_right_context=' + str(right_context), file=f)
     print('num_hidden_layers=' + str(num_hidden_layers), file=f)
     print('num_targets=' + str(num_targets), file=f)
-    print('add_lda=true'), file=f)
+    print('add_lda=true', file=f)
     print('include_log_softmax=true', file=f)
     print('objective_type=linear', file=f)
     f.close()
@@ -245,9 +260,16 @@ def MakeConfigs(config_dir, num_streams, main_stream, splice_indexes_string,
     for key in config_files.keys():
         PrintConfig(key, config_files[key])
 
+    # write down the names of the pseudo sup nodes
+    for key in lsr_node_files.keys():
+        f = open(key, "w")
+        f.write(",".join(lsr_node_files[key]))
+        f.close()
+
 def Main():
     args = GetArgs()
 
+    pprint.pprint(vars(args))
     MakeConfigs(config_dir = args.config_dir,
                 num_streams = args.num_streams,
                 main_stream = args.main_stream,
