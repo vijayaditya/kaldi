@@ -108,6 +108,10 @@ def GetArgs():
                         help="A non-zero value activates the self-repair mechanism in the sigmoid and tanh non-linearities of the LSTM", default=None)
 
 
+    parser.add_argument("--pool-type", type=str, default = 'none',
+                        help="Type of pooling to be used.", choices = ['per-dim-weighted-average', 'none'])
+    parser.add_argument("--pool-window", type=int, default = None,
+                        help="Width of the pooling window")
     parser.add_argument("--use-presoftmax-prior-scale", type=str, action=nnet3_train_lib.StrToBoolAction,
                         help="if true, a presoftmax-prior-scale is added",
                         choices=['true', 'false'], default = True)
@@ -149,6 +153,8 @@ def CheckArgs(args):
 
     if (args.subset_dim < 0):
         raise Exception("--subset-dim has to be non-negative")
+    if (args.pool_window is not None) and (args.pool_window <= 0):
+        raise Exception("--pool-window has to be positive")
 
     if not args.relu_dim is None:
         if not args.pnorm_input_dim is None or not args.pnorm_output_dim is None:
@@ -298,6 +304,7 @@ def MakeConfigs(config_dir, splice_indexes_string,
                 cnn_layer, cnn_bottleneck_dim, cepstral_lifter,
                 feat_dim, ivector_dim, num_targets, add_lda,
                 nonlin_type, nonlin_input_dim, nonlin_output_dim, subset_dim,
+                pool_type, pool_window,
                 use_presoftmax_prior_scale,
                 final_layer_normalize_target,
                 include_log_softmax,
@@ -355,6 +362,20 @@ def MakeConfigs(config_dir, splice_indexes_string,
                 zero_index = splice_indexes[i].index(0)
             except ValueError:
                 zero_index = None
+
+
+            if pool_type == "per-dim-weighted-average":
+                # add permute component to shuffle the feature columns of the Append descriptor output so
+                # that columns corresponding to the same feature index are contiguous
+                # add a block-affine component to collapse all the feature indexes across time steps into a single value
+                [prev_layer_output, cur_left_context, cur_right_context] = nodes.AddPerDimAffineLayer(config_lines,
+                                                                                                      'Tdnn_input_{0}'.format(i),
+                                                                                                       prev_layer_output,
+                                                                                                       pool_window)
+
+                left_context += cur_left_context
+                right_context += cur_right_context
+
             # I just assume the prev_layer_output_descriptor is a simple forwarding descriptor
             prev_layer_output_descriptor = prev_layer_output['descriptor']
             subset_output = prev_layer_output
@@ -490,6 +511,7 @@ def Main():
                 nonlin_input_dim = args.nonlin_input_dim,
                 nonlin_output_dim = args.nonlin_output_dim,
                 subset_dim = args.subset_dim,
+                pool_type = args.pool_type, pool_window = args.pool_window,
                 use_presoftmax_prior_scale = args.use_presoftmax_prior_scale,
                 final_layer_normalize_target = args.final_layer_normalize_target,
                 include_log_softmax = args.include_log_softmax,
