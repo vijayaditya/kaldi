@@ -52,7 +52,7 @@ if [ $stage -le 3 ]; then
     date=$(date +'%m_%d_%H_%M')
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/swbd-$date/s5b/$mfccdir/storage $mfccdir/storage
   fi
-
+  false && {
   # the 100k_nodup directory is copied seperately, as
   # we want to use exp/tri2_ali_100k_nodup for lda_mllt training
   # the main train directory might be speed_perturbed
@@ -93,7 +93,8 @@ for line in sys.stdin.readlines():
   # Take the first 30k utterances (about 1/8th of the data) this will be used
   # for the diagubm training
   utils/subset_data_dir.sh --first data/${train_set}_hires 30000 data/${train_set}_30k_hires
-  local/remove_dup_utts.sh 200 data/${train_set}_30k_hires data/${train_set}_30k_nodup_hires  # 33hr
+}
+  utils/data/remove_dup_utts.sh 200 data/${train_set}_30k_hires data/${train_set}_30k_nodup_hires  # 33hr
 fi
 
 # ivector extractor training

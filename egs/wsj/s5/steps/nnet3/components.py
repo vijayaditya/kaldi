@@ -42,8 +42,9 @@ def AddInputLayer(config_lines, feat_dim, splice_indexes=[0], ivector_dim=0):
     else:
         splice_descriptor = list[0]
     print(splice_descriptor)
-    return {'descriptor': splice_descriptor,
-            'dimension': output_dim}
+    return {'output': {'descriptor': splice_descriptor,
+                       'dimension': output_dim},
+            'num_learnable_params' : 0}
 
 def AddNoOpLayer(config_lines, name, input):
     components = config_lines['components']
@@ -52,8 +53,9 @@ def AddNoOpLayer(config_lines, name, input):
     components.append('component name={0}_noop type=NoOpComponent dim={1}'.format(name, input['dimension']))
     component_nodes.append('component-node name={0}_noop component={0}_noop input={1}'.format(name, input['descriptor']))
 
-    return {'descriptor':  '{0}_noop'.format(name),
-            'dimension': input['dimension']}
+    return {'output' : {'descriptor':  '{0}_noop'.format(name),
+                        'dimension': input['dimension']},
+            'num_learnable_params' : 0}
 
 def AddLdaLayer(config_lines, name, input, lda_file):
     return AddFixedAffineLayer(config_lines, name, input, lda_file)
@@ -65,9 +67,69 @@ def AddFixedAffineLayer(config_lines, name, input, matrix_file):
     components.append('component name={0}_fixaffine type=FixedAffineComponent matrix={1}'.format(name, matrix_file))
     component_nodes.append('component-node name={0}_fixaffine component={0}_fixaffine input={1}'.format(name, input['descriptor']))
 
-    return {'descriptor':  '{0}_fixaffine'.format(name),
-            'dimension': input['dimension']}
+    return {'output' : {'descriptor':  '{0}_fixaffine'.format(name),
+                        'dimension': input['dimension']},
+            'num_learnable_params' : 0}
 
+def AddPerDimAffineLayer(config_lines, name, input, input_window, time_period = 1, return_if_single=True):
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+
+    filter_context = int((input_window - 1) / 2)
+    filter_input_splice_indexes = range(-1 * filter_context, filter_context + 1, time_period)
+    if len(filter_input_splice_indexes) == 1 and filter_input_splice_indexes[0] == 0:
+        return {'output':input,
+                'filter_left_context' : 0,
+                'filter_right_context' : 0,
+                'num_learnable_params' : 0}
+    list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
+    filter_input_descriptor = 'Append({0})'.format(' , '.join(list))
+    filter_input_descriptor = {'descriptor':filter_input_descriptor,
+                               'dimension':len(filter_input_splice_indexes) * input['dimension']}
+
+    num_learnable_params = 0
+    # add permute component to shuffle the feature columns of the Append
+    # descriptor output so that columns corresponding to the same feature index
+    # are contiguous add a block-affine component to collapse all the feature
+    # indexes across time steps into a single value
+    num_feats = input['dimension']
+    num_times = len(filter_input_splice_indexes)
+    column_map = []
+    for i in range(num_feats):
+        for j in range(num_times):
+            column_map.append(j * num_feats + i)
+
+    composite_config_lines = {'components':[], 'component-nodes':[]}
+
+    permute_layer = AddPermuteLayer(composite_config_lines,
+            name, filter_input_descriptor, column_map)
+    permuted_output_descriptor = permute_layer['output']
+    num_learnable_params = permute_layer['num_learnable_params']
+
+    # add a block-affine component
+    prev_layer = AddBlockAffineLayer(composite_config_lines, name,
+                                     permuted_output_descriptor,
+                                     num_feats, num_feats)
+    print(prev_layer)
+    output_descriptor = prev_layer['output']
+    num_learnable_params += prev_layer['num_learnable_params']
+    # strip names
+    ccl = composite_config_lines['components']
+    composite_config_line = ''
+    for index in range(len(ccl)):
+        parts = ccl[index].split()
+        assert(parts[0] == "component" and parts[1].split('=')[0] == "name")
+        composite_config_line += " component{0}='{1}'".format(index+1, " ".join(parts[2:]))
+
+    components.append("component name={name} type=CompositeComponent num-components={nc} {rest}".format(name = '{0}_PDA'.format(name),
+                   nc = len(ccl),
+                   rest = composite_config_line))
+    component_nodes.append("component-node name={0}_PDA component={0}_PDA input={1}".format(name, filter_input_descriptor['descriptor']))
+    return {'output':{'descriptor': '{0}_PDA'.format(name),
+                       'dimension': output_descriptor['dimension']},
+            'num_learnable_params' : 0,
+            'filter_left_context' : filter_context,
+            'filter_left_context' : filter_context }
 
 def AddBlockAffineLayer(config_lines, name, input, output_dim, num_blocks):
     components = config_lines['components']
@@ -77,8 +139,10 @@ def AddBlockAffineLayer(config_lines, name, input, output_dim, num_blocks):
     components.append('component name={0}_block_affine type=BlockAffineComponent input-dim={1} output-dim={2} num-blocks={3}'.format(name, input['dimension'], output_dim, num_blocks))
     component_nodes.append('component-node name={0}_block_affine component={0}_block_affine input={1}'.format(name, input['descriptor']))
 
-    return {'descriptor' : '{0}_block_affine'.format(name),
-                           'dimension' : output_dim}
+    return {'output' : {'descriptor' : '{0}_block_affine'.format(name),
+                        'dimension' : output_dim},
+            'num_learnable_params' : input['dimension'] * output_dim}
+
 
 def AddPermuteLayer(config_lines, name, input, column_map):
     components = config_lines['components']
@@ -87,8 +151,9 @@ def AddPermuteLayer(config_lines, name, input, column_map):
     components.append('component name={0}_permute type=PermuteComponent column-map={1}'.format(name, permute_indexes))
     component_nodes.append('component-node name={0}_permute component={0}_permute input={1}'.format(name, input['descriptor']))
 
-    return {'descriptor': '{0}_permute'.format(name),
-            'dimension': input['dimension']}
+    return {'output' : {'descriptor': '{0}_permute'.format(name),
+                        'dimension': input['dimension']},
+            'num_learnable_params' : 0 }
 
 def AddAffineLayer(config_lines, name, input, output_dim, ng_affine_options = ""):
     components = config_lines['components']
@@ -97,8 +162,9 @@ def AddAffineLayer(config_lines, name, input, output_dim, ng_affine_options = ""
     components.append("component name={0}_affine type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, input['dimension'], output_dim, ng_affine_options))
     component_nodes.append("component-node name={0}_affine component={0}_affine input={1}".format(name, input['descriptor']))
 
-    return {'descriptor':  '{0}_affine'.format(name),
-            'dimension': output_dim}
+    return {'output' : {'descriptor':  '{0}_affine'.format(name),
+                        'dimension': output_dim},
+            'num_learnable_params' : input['dimension'] * output_dim }
 
 def AddAffRelNormLayer(config_lines, name, input, output_dim, ng_affine_options = " bias-stddev=0 ", norm_target_rms = 1.0, self_repair_scale = None):
     components = config_lines['components']
@@ -114,8 +180,9 @@ def AddAffRelNormLayer(config_lines, name, input, output_dim, ng_affine_options 
     component_nodes.append("component-node name={0}_relu component={0}_relu input={0}_affine".format(name))
     component_nodes.append("component-node name={0}_renorm component={0}_renorm input={0}_relu".format(name))
 
-    return {'descriptor':  '{0}_renorm'.format(name),
-            'dimension': output_dim}
+    return {'output' : {'descriptor':  '{0}_renorm'.format(name),
+                        'dimension': output_dim},
+            'num_learnable_params' : input['dimension'] * output_dim }
 
 def AddAffPnormLayer(config_lines, name, input, pnorm_input_dim, pnorm_output_dim, ng_affine_options = " bias-stddev=0 ", norm_target_rms = 1.0):
     components = config_lines['components']
@@ -129,8 +196,9 @@ def AddAffPnormLayer(config_lines, name, input, pnorm_input_dim, pnorm_output_di
     component_nodes.append("component-node name={0}_pnorm component={0}_pnorm input={0}_affine".format(name))
     component_nodes.append("component-node name={0}_renorm component={0}_renorm input={0}_pnorm".format(name))
 
-    return {'descriptor':  '{0}_renorm'.format(name),
-            'dimension': pnorm_output_dim}
+    return {'output' : {'descriptor':  '{0}_renorm'.format(name),
+                        'dimension': pnorm_output_dim},
+            'num_learnable_params' : input['dimension'] * pnorm_input_dim }
 
 def AddConvolutionLayer(config_lines, name, input,
                        input_x_dim, input_y_dim, input_z_dim,
@@ -164,10 +232,11 @@ def AddConvolutionLayer(config_lines, name, input,
     num_x_steps = (1 + (input_x_dim - filt_x_dim) / filt_x_step)
     num_y_steps = (1 + (input_y_dim - filt_y_dim) / filt_y_step)
     output_dim = num_x_steps * num_y_steps * num_filters;
-    return {'descriptor':  '{0}_conv_t'.format(name),
-            'dimension': output_dim,
-            '3d-dim': [num_x_steps, num_y_steps, num_filters],
-            'vectorization': 'zyx'}
+    return {'output' : {'descriptor':  '{0}_conv_t'.format(name),
+                        'dimension': output_dim,
+                        '3d-dim': [num_x_steps, num_y_steps, num_filters],
+                        'vectorization': 'zyx'},
+            'num_learnable_params' : filt_x_dim * filt_y_dim * input_z_dim }
 
 # The Maxpooling component assumes input vectorizations of type zyx
 def AddMaxpoolingLayer(config_lines, name, input,
@@ -202,10 +271,11 @@ def AddMaxpoolingLayer(config_lines, name, input,
     num_pools_z = 1 + (input_z_dim - pool_z_size) / pool_z_step;
     output_dim = num_pools_x * num_pools_y * num_pools_z;
 
-    return {'descriptor':  '{0}_maxp_t'.format(name),
-            'dimension': output_dim,
-            '3d-dim': [num_pools_x, num_pools_y, num_pools_z],
-            'vectorization': 'zyx'}
+    return {'output' : {'descriptor':  '{0}_maxp_t'.format(name),
+                        'dimension': output_dim,
+                        '3d-dim': [num_pools_x, num_pools_y, num_pools_z],
+                        'vectorization': 'zyx'},
+            'num_learnable_params' : 0 }
 
 
 def AddSoftmaxLayer(config_lines, name, input):
@@ -215,8 +285,9 @@ def AddSoftmaxLayer(config_lines, name, input):
     components.append("component name={0}_log_softmax type=LogSoftmaxComponent dim={1}".format(name, input['dimension']))
     component_nodes.append("component-node name={0}_log_softmax component={0}_log_softmax input={1}".format(name, input['descriptor']))
 
-    return {'descriptor':  '{0}_log_softmax'.format(name),
-            'dimension': input['dimension']}
+    return {'output' : {'descriptor':  '{0}_log_softmax'.format(name),
+                        'dimension': input['dimension']},
+            'num_learnable_params' : 0 }
 
 
 def AddSigmoidLayer(config_lines, name, input, self_repair_scale = None):
@@ -227,8 +298,9 @@ def AddSigmoidLayer(config_lines, name, input, self_repair_scale = None):
     self_repair_string = "self-repair-scale={0:.10f}".format(self_repair_scale) if self_repair_scale is not None else ''
     components.append("component name={0}_sigmoid type=SigmoidComponent dim={1}".format(name, input['dimension'], self_repair_string))
     component_nodes.append("component-node name={0}_sigmoid component={0}_sigmoid input={1}".format(name, input['descriptor']))
-    return {'descriptor':  '{0}_sigmoid'.format(name),
-            'dimension': input['dimension']}
+    return {'output' : {'descriptor':  '{0}_sigmoid'.format(name),
+                        'dimension': input['dimension']},
+            'num_learnable_params' : 0}
 
 def AddOutputLayer(config_lines, input, label_delay = None, suffix=None, objective_type = "linear"):
     components = config_lines['components']
@@ -254,29 +326,38 @@ def AddFinalLayer(config_lines, input, output_dim,
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
 
+    num_learnable_params = 0
     if name_affix is not None:
         final_node_prefix = 'Final-' + str(name_affix)
     else:
         final_node_prefix = 'Final'
 
-    prev_layer_output = AddAffineLayer(config_lines,
+    prev_layer = AddAffineLayer(config_lines,
             final_node_prefix , input, output_dim,
             ng_affine_options)
+    prev_layer_output = prev_layer['output']
+    num_learnable_params += prev_layer['num_learnable_params']
+
     if include_log_softmax:
         if use_presoftmax_prior_scale :
             components.append('component name={0}-fixed-scale type=FixedScaleComponent scales={1}'.format(final_node_prefix, prior_scale_file))
             component_nodes.append('component-node name={0}-fixed-scale component={0}-fixed-scale input={1}'.format(final_node_prefix,
                 prev_layer_output['descriptor']))
             prev_layer_output['descriptor'] = "{0}-fixed-scale".format(final_node_prefix)
-        prev_layer_output = AddSoftmaxLayer(config_lines, final_node_prefix, prev_layer_output)
+        prev_layer = AddSoftmaxLayer(config_lines, final_node_prefix, prev_layer_output)
+        prev_layer_output = prev_layer['output']
+        num_learnable_params += prev_layer['num_learnable_params']
     elif add_final_sigmoid:
         # Useful when you need the final outputs to be probabilities
         # between 0 and 1.
         # Usually used with an objective-type such as "quadratic"
-        prev_layer_output = AddSigmoidLayer(config_lines, final_node_prefix, prev_layer_output)
+        prev_layer = AddSigmoidLayer(config_lines, final_node_prefix, prev_layer_output)
+        prev_layer_output = prev_layer['output']
+        num_learnable_params += prev_layer['num_learnable_params']
     # we use the same name_affix as a prefix in for affine/scale nodes but as a
     # suffix for output node
     AddOutputLayer(config_lines, prev_layer_output, label_delay, suffix = name_affix, objective_type = objective_type)
+    return num_learnable_params
 
 def AddLstmLayer(config_lines,
                  name, input, cell_dim,
@@ -289,7 +370,9 @@ def AddLstmLayer(config_lines,
                  lstm_delay = -1,
                  self_repair_scale_nonlinearity = None,
                  self_repair_scale_clipgradient = None):
+
     assert(recurrent_projection_dim >= 0 and non_recurrent_projection_dim >= 0)
+    num_learnable_params = 0
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
 
@@ -316,24 +399,32 @@ def AddLstmLayer(config_lines,
     self_repair_clipgradient_string = "self-repair-scale={0:.2f}".format(self_repair_scale_clipgradient) if self_repair_scale_clipgradient is not None else ''
     # Natural gradient per element scale parameters
     ng_per_element_scale_options += " param-mean=0.0 param-stddev=1.0 "
-    # Parameter Definitions W*(* replaced by - to have valid names)
+    # Paramete Definitions W*(* replaced by - to have valid names)
     components.append("# Input gate control : W_i* matrices")
     components.append("component name={0}_W_i-xr type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, input_dim + recurrent_projection_dim, cell_dim, ng_affine_options))
+    num_learnable_params += (input_dim + recurrent_projection_dim) * cell_dim
     components.append("# note : the cell outputs pass through a diagonal matrix")
     components.append("component name={0}_w_ic type=NaturalGradientPerElementScaleComponent  dim={1} {2}".format(name, cell_dim, ng_per_element_scale_options))
+    num_learnable_params += cell_dim
 
     components.append("# Forget gate control : W_f* matrices")
     components.append("component name={0}_W_f-xr type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, input_dim + recurrent_projection_dim, cell_dim, ng_affine_options))
+    num_learnable_params += (input_dim + recurrent_projection_dim) * cell_dim
+
     components.append("# note : the cell outputs pass through a diagonal matrix")
     components.append("component name={0}_w_fc type=NaturalGradientPerElementScaleComponent  dim={1} {2}".format(name, cell_dim, ng_per_element_scale_options))
+    num_learnable_params += cell_dim
 
     components.append("#  Output gate control : W_o* matrices")
     components.append("component name={0}_W_o-xr type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, input_dim + recurrent_projection_dim, cell_dim, ng_affine_options))
+    num_learnable_params += (input_dim + recurrent_projection_dim) * cell_dim
     components.append("# note : the cell outputs pass through a diagonal matrix")
     components.append("component name={0}_w_oc type=NaturalGradientPerElementScaleComponent  dim={1} {2}".format(name, cell_dim, ng_per_element_scale_options))
+    num_learnable_params += cell_dim
 
     components.append("# Cell input matrices : W_c* matrices")
     components.append("component name={0}_W_c-xr type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, input_dim + recurrent_projection_dim, cell_dim, ng_affine_options))
+    num_learnable_params += (input_dim + recurrent_projection_dim) * cell_dim
 
 
     components.append("# Defining the non-linearities")
@@ -386,6 +477,7 @@ def AddLstmLayer(config_lines,
     if (add_recurrent_projection and add_non_recurrent_projection):
         components.append("# projection matrices : Wrm and Wpm")
         components.append("component name={0}_W-m type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, cell_dim, recurrent_projection_dim + non_recurrent_projection_dim, ng_affine_options))
+        num_learnable_params += cell_dim * (non_recurrent_projection_dim + recurrent_projection_dim)
         components.append("component name={0}_r type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} {4}".format(name, recurrent_projection_dim, clipping_threshold, norm_based_clipping, self_repair_clipgradient_string))
         component_nodes.append("# r_t and p_t")
         component_nodes.append("component-node name={0}_rp_t component={0}_W-m input={0}_m_t".format(name))
@@ -397,6 +489,7 @@ def AddLstmLayer(config_lines,
     elif add_recurrent_projection:
         components.append("# projection matrices : Wrm")
         components.append("component name={0}_Wrm type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, cell_dim, recurrent_projection_dim, ng_affine_options))
+        num_learnable_params += cell_dim * recurrent_projection_dim
         components.append("component name={0}_r type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} {4}".format(name, recurrent_projection_dim, clipping_threshold, norm_based_clipping, self_repair_clipgradient_string))
         component_nodes.append("# r_t")
         component_nodes.append("component-node name={0}_r_t_preclip component={0}_Wrm input={0}_m_t".format(name))
@@ -410,10 +503,10 @@ def AddLstmLayer(config_lines,
         output_descriptor = '{0}_r_t'.format(name)
         output_dim = cell_dim
 
-    return {
-            'descriptor': output_descriptor,
-            'dimension':output_dim
-            }
+    return {'output' : {'descriptor': output_descriptor,
+                        'dimension':output_dim},
+            'num_learnable_params' : num_learnable_params}
+
 
 def AddBLstmLayer(config_lines,
                   name, input, cell_dim,
@@ -427,25 +520,271 @@ def AddBLstmLayer(config_lines,
                   self_repair_scale_nonlinearity = None,
                   self_repair_scale_clipgradient = None):
     assert(len(lstm_delay) == 2 and lstm_delay[0] < 0 and lstm_delay[1] > 0)
-    output_forward = AddLstmLayer(config_lines, "{0}_forward".format(name), input, cell_dim,
+    num_learnable_params = 0
+    prev_layer = AddLstmLayer(config_lines, "{0}_forward".format(name), input, cell_dim,
                                   recurrent_projection_dim, non_recurrent_projection_dim,
                                   clipping_threshold, norm_based_clipping,
                                   ng_per_element_scale_options, ng_affine_options,
                                   lstm_delay = lstm_delay[0],
                                   self_repair_scale_nonlinearity = self_repair_scale_nonlinearity,
                                   self_repair_scale_clipgradient = self_repair_scale_clipgradient)
-    output_backward = AddLstmLayer(config_lines, "{0}_backward".format(name), input, cell_dim,
+    output_forward = prev_layer['output']
+    num_learnable_params += prev_layer['num_learnable_params']
+
+    prev_layer  = AddLstmLayer(config_lines, "{0}_backward".format(name), input, cell_dim,
                                    recurrent_projection_dim, non_recurrent_projection_dim,
                                    clipping_threshold, norm_based_clipping,
                                    ng_per_element_scale_options, ng_affine_options,
                                    lstm_delay = lstm_delay[1],
                                    self_repair_scale_nonlinearity = self_repair_scale_nonlinearity,
                                    self_repair_scale_clipgradient = self_repair_scale_clipgradient)
+    output_backward = prev_layer['output']
+    num_learnable_params += prev_layer['num_learnable_params']
+
     output_descriptor = 'Append({0}, {1})'.format(output_forward['descriptor'], output_backward['descriptor'])
     output_dim = output_forward['dimension'] + output_backward['dimension']
 
-    return {
-            'descriptor': output_descriptor,
-            'dimension':output_dim
-            }
- 
+    return {'output' : {'descriptor': output_descriptor,
+                        'dimension':output_dim},
+            'num_learnable_params' : num_learnable_params}
+
+
+#########################################################################################
+# Clockwork RNN
+#########################################################################################
+
+def AddCwrnnLayer(config_lines,
+                  name, input,
+                  operating_time_period,
+                  clipping_threshold = 1.0,
+                  norm_based_clipping = "false",
+                  ng_per_element_scale_options = "",
+                  ratewise_params = {'T1': {'rate':1, 'dim':128},
+                                     'T2': {'rate':1.0/2, 'dim':128},
+                                     'T3': {'rate':1.0/4, 'dim':128},
+                                     'T4': {'rate':1.0/8, 'dim':128}
+                                     },
+                  nonlinearity = "RectifiedLinearComponent+NormalizedComponent",
+                  diag_init_scaling_factor = 0,
+                  input_type = "none",
+                  projection_dim = 0,
+                  self_repair_scale_nonlinearity=None,
+                  self_repair_scale_clipgradient=None):
+
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+
+    num_learnable_params = 0
+    key_rate_pairs = map(lambda key: (key, ratewise_params[key]['rate']), ratewise_params)
+    key_rate_pairs.sort(key=itemgetter(1))
+    sorted_keys = map(lambda x: x[0], key_rate_pairs)
+    largest_time_period = int(1.0/ratewise_params[sorted_keys[0]]['rate'])
+
+    slow_to_fast_descriptors = {}
+    for key in sorted_keys:
+        slow_to_fast_descriptors[key] = {}
+
+    output_descriptors_all_rates = {}
+    for key_index in xrange(len(sorted_keys)):
+        key = sorted_keys[key_index]
+        params = ratewise_params[key]
+        rate = params['rate']
+        time_period = int(round(1.0/params['rate']))
+        cw_unit_input_descriptor = input
+        print(input)
+        fastrate_params = {}
+        for fast_key_index in range(key_index+1, len(sorted_keys)):
+            fast_key = sorted_keys[fast_key_index]
+            fastrate_params[fast_key] = ratewise_params[fast_key]
+
+        [output_descriptor, fastrate_output_descriptors, cur_num_learnable_params] = AddCwrnnRateUnit(config_lines,
+                                                                            name = '{0}_{1}'.format(name, key),
+                                                                            input = cw_unit_input_descriptor,
+                                                                            output_dim = params['dim'],
+                                                                            unit_rate = params['rate'],
+                                                                            operating_time_period = operating_time_period,
+                                                                            clipping_threshold = clipping_threshold,
+                                                                            norm_based_clipping = norm_based_clipping,
+                                                                            delay = -1 * time_period,
+                                                                            slowrate_descriptors = slow_to_fast_descriptors[key],
+                                                                            fastrate_params = fastrate_params,
+                                                                            nonlinearity = nonlinearity,
+                                                                            diag_init_scaling_factor = diag_init_scaling_factor,
+                                                                            input_type = input_type,
+                                                                            self_repair_scale_nonlinearity = self_repair_scale_nonlinearity,
+                                                                            self_repair_scale_clipgradient = self_repair_scale_clipgradient)
+        num_learnable_params += cur_num_learnable_params
+        output_descriptors_all_rates[key] = output_descriptor
+        for fastrate in fastrate_output_descriptors.keys():
+            slow_to_fast_descriptors[fastrate][key] = fastrate_output_descriptors[fastrate]
+
+    # concatenate the output descriptors
+    # add an if-defined for all descriptors leaving the one corresponding
+    # to the fastest descriptor
+    descriptor_strings = []
+    dimension = 0
+    for key in sorted_keys[:-1]:
+        cur_descriptor = output_descriptors_all_rates[key]
+        descriptor_strings.append('IfDefined({0})'.format(cur_descriptor['descriptor']))
+        dimension += cur_descriptor['dimension']
+    # this is the fastest rate so there is no if_defined
+    descriptor_strings.append(output_descriptors_all_rates[sorted_keys[-1]]['descriptor'])
+    dimension += output_descriptors_all_rates[sorted_keys[-1]]['dimension']
+
+
+    output_descriptor = {}
+    output_descriptor['descriptor'] = 'Append({0})'.format(', '.join(descriptor_strings))
+    output_descriptor['dimension'] = dimension
+
+    if projection_dim > 0:
+        prev_layer = AddAffRelNormLayer(config_lines, '{0}_project'.format(name),
+                                        output_descriptor, projection_dim)
+        output_descriptor = prev_layer['output']
+        num_learnable_params += prev_layer['num_learnable_params']
+
+    return {'output' : output_descriptor,
+            'num_learnable_params' : num_learnable_params,
+            'largest_time_period' : largest_time_period}
+
+
+
+# Note : this method is not a Add*Layer method we don't intend it to be directly called
+# by the top level scripts. The output of this Unit does not follow the expected
+# convention
+def AddCwrnnRateUnit(config_lines,
+                    name, input, output_dim,
+                    unit_rate,
+                    operating_time_period,
+                    clipping_threshold = 1.0,
+                    norm_based_clipping = "false",
+                    ng_affine_options = " bias-stddev=0 ",
+                    delay = -1,
+                    slowrate_descriptors = {},
+                    fastrate_params = {},
+                    nonlinearity = "SigmoidComponent",
+                    diag_init_scaling_factor = 0,
+                    input_type = "none",
+                    self_repair_scale_nonlinearity=None,
+                    self_repair_scale_clipgradient=None):
+
+    num_learnable_params = 0
+    # self_repair_scale_nonlinearity is a constant scaling the self-repair vector computed in derived classes of NonlinearComponent,
+    # i.e.,  SigmoidComponent, TanhComponent and RectifiedLinearComponent
+    self_repair_nonlinearity_string = "self-repair-scale={0:.10f}".format(self_repair_scale_nonlinearity) if self_repair_scale_nonlinearity is not None else ''
+    # self_repair_scale_clipgradient is a constant scaling the self-repair vector computed in ClipGradientComponent
+    self_repair_clipgradient_string = "self-repair-scale={0:.2f}".format(self_repair_scale_clipgradient) if self_repair_scale_clipgradient is not None else ''
+
+    if diag_init_scaling_factor != 0:
+        raise NotImplementedError
+        # this is tricky to implement and not so helpful so I will not implement unless absolutely necessary
+        warnings.warn("Ignoring ng_affine_options, diag_init_scaling_factor is implemented by specifying the parameter matrix as a file",
+                      stacklevel=3)
+        # we use a single matrix from each input rate to all output rates,
+        # so diag-init-scaling factor no longer works
+        # we would have to load a matrix which follows this structure
+
+    # assign some variables to reduce verbosity of the code
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+    input_descriptor = input['descriptor']
+    input_dim = input['dimension']
+    name = name.strip()
+
+    recurrent_connection = "r_t"
+    if len(slowrate_descriptors.keys()) > 0:
+        slowrate_sum_descriptor = GetSumDescriptor(map(lambda x: x['descriptor'], slowrate_descriptors.values()))[0]
+    else:
+        slowrate_sum_descriptor = ''
+
+    unit_time_period = int(1.0 / unit_rate)
+
+    # process the input & update the input variables
+    if input_type in set(["stack", "sum"]):
+        splice_indexes = range(-1*(unit_time_period-1), 1, operating_time_period)
+        list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in splice_indexes]
+        if input_type == "stack":
+            input_descriptor = 'Append({0})'.format(' , '.join(list))
+            input_dim = len(splice_indexes) * input_dim
+        elif input_type == "sum":
+            input_descriptor = GetSumDescriptor(list)[0]
+    elif input_type == "per-dim-weighted-average":
+        prev_layer = AddPerDimAffineLayer(config_lines, name, input, 2 * (unit_time_period - operating_time_period) + 1, time_period = operating_time_period)
+        print(prev_layer)
+        input = prev_layer['output']
+        num_learnable_params += prev_layer['num_learnable_params']
+
+        input_dim = input['dimension']
+        input_descriptor = input['descriptor']
+
+    # component definitions W*(* replaced by - to have valid names)
+    components.append("# Components for rate {0}: Wxr".format(unit_rate))
+    total_fastrate_unit_dim = sum(map(lambda x: x['dim'], fastrate_params.values()))
+    recurrent_output_dim = output_dim + total_fastrate_unit_dim
+    components.append("component name={0}_W_r type=NaturalGradientAffineComponent"
+                      " input-dim={1} output-dim={2} rank-in={3} rank-out={4} {5}".format(
+                      name, output_dim, recurrent_output_dim,
+                      int(output_dim * 0.1), int(recurrent_output_dim * 0.1),
+                      ng_affine_options))
+
+    num_learnable_params += output_dim * recurrent_output_dim
+
+    components.append("component name={0}_W_x type=NaturalGradientAffineComponent"
+                      " input-dim={1} output-dim={2} rank-in={3} rank-out={4} {5}".format(
+                      name, input_dim, output_dim,
+                      int(input_dim * 0.1), int(output_dim * 0.1),
+                      ng_affine_options))
+    num_learnable_params += input_dim * output_dim
+    component_nodes.append("component-node name={0}_W_x_t component={0}_W_x input={1}".format(name, input_descriptor))
+    descriptors = [ '{0}_W_r_t'.format(name), '{0}_W_x_t'.format(name)]
+    if slowrate_sum_descriptor != '':
+        descriptors.append(slowrate_sum_descriptor)
+    nonlin_input_sum_descriptor = GetSumDescriptor(descriptors)[0]
+
+
+    # Add the non-linearity component.
+    if nonlinearity == "RectifiedLinearComponent+NormalizeComponent":
+        components.append("component name={0}_relu type=RectifiedLinearComponent dim={1} {2}".format(name, output_dim, self_repair_nonlinearity_string))
+        components.append("component name={0}_renorm type=NormalizeComponent dim={1} target-rms={2}".format(name, output_dim, 1.0))
+
+        component_nodes.append("component-node name={0}_{1}_relu component={0}_relu input={2}".format(name, recurrent_connection, nonlin_input_sum_descriptor))
+        component_nodes.append("component-node name={0}_{1}_preclip component={0}_renorm input={0}_{1}_relu".format(name, recurrent_connection))
+
+    elif nonlinearity in ['SigmoidComponent', 'TanhComponent', 'RectifiedLinearComponent']:
+        components.append("component name={0}_nonlin type={1} dim={2} {3}".format(name, nonlinearity, output_dim, self_repair_nonlinearity_string))
+        component_nodes.append("component-node name={0}_{1}_preclip component={0}_nonlin input={3}".format(name, recurrent_connection, nonlin_input_sum_descriptor))
+    else:
+        raise Exception("Unknown non-linearity type {0}.".format(nonlinearity))
+
+    # Adding the gradient clipper
+    components.append("component name={0}_clip type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} {4} ".format(name, output_dim, clipping_threshold, norm_based_clipping, self_repair_clipgradient_string))
+    component_nodes.append("component-node name={0}_{1} component={0}_clip input={0}_{1}_preclip".format(name, recurrent_connection))
+
+
+    # take the recurrent outputs from the current unit and divide them among all the fast rate units
+    fastrate_output_descriptors = {}
+    keys = fastrate_params.keys()
+    if total_fastrate_unit_dim == 0:
+        # there are no recurrent connections from this rate unit to faster rate  units
+        component_nodes.append("component-node name={0}_W_r_t component={0}_W_r input=IfDefined(Offset({0}_{1}, {2}))".format(name, recurrent_connection, delay))
+    else:
+        # there are recurrent connections from this rate unit to faster rate  units
+        # we will compute all these in a single matrix multiplication
+        component_nodes.append("component-node name={0}_W_r_all_t component={0}_W_r input=IfDefined(Offset({0}_{1}, {2}))".format(name, recurrent_connection, delay))
+
+        # the first subset in the recurrent outputs corresponds to the current rate
+        component_nodes.append("dim-range-node name={0}_W_r_t input-node={0}_W_r_all_t dim-offset=0 dim={1}".format(name, output_dim))
+
+        # dividing rest of the recurrent outputs among the faster rates
+        offset = output_dim
+        for key in fastrate_params.keys():
+            params = fastrate_params[key]
+            fastrate_time_period = int(1.0/params['rate'])
+            output_name = '{0}_W_rfast-tmod{1}_t'.format(name, fastrate_time_period)
+            component_nodes.append("dim-range-node name={1} input-node={0}_W_r_all_t dim-offset={2} dim={3}".format(name, output_name, offset, params['dim']))
+            offset += params['dim']
+            fastrate_descriptor = 'Round({0}, {1})'.format(output_name, unit_time_period)
+            fastrate_output_descriptors[key] = {'descriptor': fastrate_descriptor,
+                                                'dimension' : params['dim']}
+
+    output_descriptor = "{0}_{1}".format(name, recurrent_connection)
+    return [{'descriptor': output_descriptor, 'dimension':output_dim}, fastrate_output_descriptors, num_learnable_params]

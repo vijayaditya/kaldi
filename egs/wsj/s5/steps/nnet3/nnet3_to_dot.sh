@@ -17,6 +17,7 @@ if [ $# != 3 ]; then
   echo " e.g.: $0 exp/sdm1/nnet3/lstm_sp/0.mdl lstm.dot lstm.png"
   echo ""
   echo "Main options (for others, see top of script file)"
+  echo "  --info-bin <string|{nnet3-am-info, nnet3-info}> # binary to used for getting model info"
   echo "  --component-attributes <string|name,type>     # attributes to be printed in nnet3 components"
   echo "  --node-prefixes <string|Lstm1,Lstm2>          # list of prefixes. Nnet3 components/component-nodes with the same prefix"
   echo "                                                # will be clustered together in the dot-graph"

@@ -4,8 +4,8 @@
 # begin configuration section.
 cmd=run.pl
 stage=0
-min_lmwt=5
-max_lmwt=17
+min_lmwt=1
+max_lmwt=22
 iter=final
 word_ins_penalty=0.0,0.5,1.0
 #end configuration section.
