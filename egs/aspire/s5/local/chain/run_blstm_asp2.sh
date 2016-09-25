@@ -7,7 +7,7 @@ set -e
 # configs for 'chain'
 affix=
 stage=12 # assuming you already ran the xent systems
-train_stage=625
+train_stage=1453
 get_egs_stage=-10
 dir=exp/chain/blstm_asp2
 decode_iter=

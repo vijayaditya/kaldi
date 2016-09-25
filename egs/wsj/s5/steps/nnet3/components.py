@@ -41,7 +41,6 @@ def AddInputLayer(config_lines, feat_dim, splice_indexes=[0], ivector_dim=0):
         splice_descriptor = "Append({0})".format(", ".join(list))
     else:
         splice_descriptor = list[0]
-    print(splice_descriptor)
     return {'output': {'descriptor': splice_descriptor,
                        'dimension': output_dim},
             'num_learnable_params' : 0}
@@ -70,6 +69,57 @@ def AddFixedAffineLayer(config_lines, name, input, matrix_file):
     return {'output' : {'descriptor':  '{0}_fixaffine'.format(name),
                         'dimension': input['dimension']},
             'num_learnable_params' : 0}
+
+def AddPerDimAffineLayerMulti(config_lines, name, input, num_block_affine, input_window, time_period = 1, return_if_single=True, inputs_optional = False):
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+
+    filter_context = int((input_window - 1) / 2)
+    filter_input_splice_indexes = range(-1 * filter_context, filter_context + 1, time_period)
+    if len(filter_input_splice_indexes) == 1 and filter_input_splice_indexes[0] == 0:
+        return {'output':input,
+                'filter_left_context' : 0,
+                'filter_right_context' : 0,
+                'num_learnable_params' : 0}
+    if inputs_optional:
+        list = [('IfDefined(Offset({0}, {1}))'.format(input['descriptor'], n) if n != 0 else 'IfDefined({0})'.format(input['descriptor'])) for n in filter_input_splice_indexes]
+    else:
+        list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
+    filter_input_descriptor = 'Append({0})'.format(' , '.join(list))
+    filter_input_descriptor = {'descriptor':filter_input_descriptor,
+                               'dimension':len(filter_input_splice_indexes) * input['dimension']}
+    num_learnable_params = 0
+    # add permute component to shuffle the feature columns of the Append
+    # descriptor output so that columns corresponding to the same feature index
+    # are contiguous add a block-affine component to collapse all the feature
+    # indexes across time steps into a single value
+    num_feats = input['dimension']
+    num_times = len(filter_input_splice_indexes)
+    column_map = []
+    for i in range(num_feats):
+        for j in range(num_times):
+            column_map.append(j * num_feats + i)
+
+    permute_layer = AddPermuteLayer(config_lines,
+            name, filter_input_descriptor, column_map)
+    permuted_output_descriptor = permute_layer['output']
+    num_learnable_params = permute_layer['num_learnable_params']
+
+    outputs = []
+    for i in range(1, num_block_affine + 1):
+        # add a block-affine component
+        prev_layer = AddBlockAffineLayer(config_lines, '{0}_PDA{1}'.format(name, i),
+                                         permuted_output_descriptor,
+                                         num_feats, num_feats)
+        output_descriptor = prev_layer['output']
+        num_learnable_params += prev_layer['num_learnable_params']
+        outputs.append(output_descriptor)
+
+    return {'outputs' : outputs,
+            'num_learnable_params' : num_learnable_params,
+            'filter_left_context' : filter_context,
+            'filter_right_context' : filter_context }
+
 
 def AddPerDimAffineLayer(config_lines, name, input, input_window, time_period = 1, return_if_single=True):
     components = config_lines['components']
@@ -110,7 +160,6 @@ def AddPerDimAffineLayer(config_lines, name, input, input_window, time_period = 
     prev_layer = AddBlockAffineLayer(composite_config_lines, name,
                                      permuted_output_descriptor,
                                      num_feats, num_feats)
-    print(prev_layer)
     output_descriptor = prev_layer['output']
     num_learnable_params += prev_layer['num_learnable_params']
     # strip names
@@ -129,7 +178,7 @@ def AddPerDimAffineLayer(config_lines, name, input, input_window, time_period = 
                        'dimension': output_descriptor['dimension']},
             'num_learnable_params' : 0,
             'filter_left_context' : filter_context,
-            'filter_left_context' : filter_context }
+            'filter_right_context' : filter_context }
 
 def AddBlockAffineLayer(config_lines, name, input, output_dim, num_blocks):
     components = config_lines['components']
@@ -179,7 +228,6 @@ def AddAffRelNormLayer(config_lines, name, input, output_dim, ng_affine_options 
     component_nodes.append("component-node name={0}_affine component={0}_affine input={1}".format(name, input['descriptor']))
     component_nodes.append("component-node name={0}_relu component={0}_relu input={0}_affine".format(name))
     component_nodes.append("component-node name={0}_renorm component={0}_renorm input={0}_relu".format(name))
-
     return {'output' : {'descriptor':  '{0}_renorm'.format(name),
                         'dimension': output_dim},
             'num_learnable_params' : input['dimension'] * output_dim }
@@ -591,7 +639,6 @@ def AddCwrnnLayer(config_lines,
         rate = params['rate']
         time_period = int(round(1.0/params['rate']))
         cw_unit_input_descriptor = input
-        print(input)
         fastrate_params = {}
         for fast_key_index in range(key_index+1, len(sorted_keys)):
             fast_key = sorted_keys[fast_key_index]
@@ -646,7 +693,239 @@ def AddCwrnnLayer(config_lines,
             'num_learnable_params' : num_learnable_params,
             'largest_time_period' : largest_time_period}
 
+def AddMultiRateTdnnLayer(config_lines, name, input,
+                          rate_params, splice_indexes,
+                          nonlin_type, nonlin_input_dim, nonlin_output_dim,
+                          operating_time_period,
+                          slow_rate_optional,
+                          self_repair_scale, norm_target_rms):
 
+    print(rate_params)
+    if nonlin_type != 'relu':
+        raise Exception('Multi-rate TDNN layer only supports ReLU nonlinearities')
+    assert(nonlin_input_dim == nonlin_output_dim)
+    nonlin_dim = nonlin_input_dim
+
+    proj_outputs = []
+    num_learnable_params = 0
+    left_context = 0
+    right_context = 0
+
+    max_unit_time_period = 0
+    num_slow_rates = 0
+    for rate in rate_params.keys():
+        rate_param = rate_params[rate]
+        unit_time_period = int(1.0 / rate_param['rate'])
+        max_unit_time_period = max(unit_time_period, max_unit_time_period)
+        if unit_time_period > operating_time_period:
+            num_slow_rates += 1
+        if unit_time_period < operating_time_period:
+            raise Exception("Invalid rate {rate} : Rate {rate} has unit time period {tp},"
+                            " which is shorter than operating time period {otp}.".format(rate = rate_param['rate'],
+                                                                                         tp = unit_time_period,
+                                                                                         otp = operating_time_period))
+
+    prev_layer = AddPerDimAffineLayerMulti(config_lines,
+                                            '{0}_{1}'.format(name, max_unit_time_period),
+                                            input, num_slow_rates,
+                                            2 * (max_unit_time_period - operating_time_period) + 1,
+                                            time_period = operating_time_period,
+                                            inputs_optional = slow_rate_optional)
+
+    prev_layer_outputs = prev_layer['outputs']
+    num_learnable_params += prev_layer['num_learnable_params']
+    if not slow_rate_optional:
+        # if slow rate is optional then we don't need the context
+        # I am assuming that only the slow rate units have the
+        # PerDimAffine processed inputs
+        left_context = prev_layer['filter_left_context']
+        right_context = prev_layer['filter_right_context']
+
+    rates = rate_params.keys()
+    filtered_input_index = 0
+    for i in xrange(len(rate_params.keys())):
+        rate = rates[i]
+        rate_param = rate_params[rate]
+        unit_time_period = int(1.0 / rate_param['rate'])
+
+        # filter input
+        if unit_time_period == operating_time_period :
+            unit_input = input
+        else:
+            unit_input = prev_layer_outputs[filtered_input_index]
+            filtered_input_index += 1
+
+        prev_layer_output = SpliceInput(unit_input, splice_indexes)
+
+        prev_layer = AddAffRelNormLayer(config_lines,
+                                        '{0}_{1}'.format(name, unit_time_period),
+                                         prev_layer_output, nonlin_output_dim,
+                                         norm_target_rms = norm_target_rms,
+                                         self_repair_scale = self_repair_scale)
+        prev_layer_output = prev_layer['output']
+        num_learnable_params += prev_layer['num_learnable_params']
+
+        if unit_time_period != operating_time_period:
+            # this is the main thing here.
+            # the use of round descriptor reduces the rate of different components
+            #if slow_rate_optional:
+            #    proj_outputs.append('IfDefined(Round({0},{1}))'.format(prev_layer_output['descriptor'], unit_time_period))
+            #else:
+            #    proj_outputs.append('Round({0},{1})'.format(prev_layer_output['descriptor'], unit_time_period))
+            proj_outputs.append('Round({0},{1})'.format(prev_layer_output['descriptor'], unit_time_period))
+        else:
+            proj_outputs.append(prev_layer_output['descriptor'])
+
+    output = GetSumDescriptor(proj_outputs)[0]
+
+    return  {'output' : {'descriptor': output,
+                         'dimension' : nonlin_output_dim},
+             'num_learnable_params' : num_learnable_params,
+             'left_context' : left_context,
+             'right_context' : right_context}
+
+def AddAffineNonlinLayer(config_lines, name, input,
+                         nonlin_type, nonlin_input_dim, nonlin_output_dim,
+                         self_repair_scale, norm_target_rms):
+    if nonlin_type == "relu":
+        prev_layer = AddAffRelNormLayer(config_lines, name,
+                                               input, nonlin_output_dim,
+                                               self_repair_scale = self_repair_scale,
+                                               norm_target_rms = norm_target_rms)
+    elif nonlin_type == "pnorm":
+        prev_layer = AddAffPnormLayer(config_lines, name,
+                                             input, nonlin_input_dim, nonlin_output_dim,
+                                             norm_target_rms = norm_target_rms)
+    else:
+        raise Exception("Unknown nonlinearity type")
+    return prev_layer
+
+
+# Convenience functions
+
+def SpliceInput(input, splice_indexes):
+
+    appended_descriptors = []
+    appended_dimension = 0
+
+    try:
+        zero_index = splice_indexes.index(0)
+    except ValueError:
+        zero_index = None
+
+    for j in range(len(splice_indexes)):
+        if j == zero_index:
+            appended_descriptors.append(input['descriptor'])
+            appended_dimension += input['dimension']
+            continue
+        appended_descriptors.append('Offset({0}, {1})'.format(input['descriptor'], splice_indexes[j]))
+        appended_dimension += input['dimension']
+
+    return {'descriptor' : "Append({0})".format(" , ".join(appended_descriptors)),
+            'dimension'  : appended_dimension}
+
+def AddFinalLayersWithXentSeperateForwardAffineRegularizer(config_lines,
+                                     input, num_targets,
+                                     nonlin_type, nonlin_input_dim, nonlin_output_dim,
+                                     use_presoftmax_prior_scale,
+                                     prior_scale_file,
+                                     include_log_softmax,
+                                     self_repair_scale,
+                                     xent_regularize,
+                                     final_layer_normalize_target):
+
+    num_learnable_params = 0
+    num_learnable_params_xent = 0
+    if nonlin_type == "relu" :
+        prev_layer_chain = AddAffRelNormLayer(config_lines, "Pre_final_chain",
+                                                           input, nonlin_output_dim,
+                                                           self_repair_scale = self_repair_scale,
+                                                           norm_target_rms = final_layer_normalize_target)
+        prev_layer_xent = AddAffRelNormLayer(config_lines, "Pre_final_xent",
+                                                          input, nonlin_output_dim,
+                                                          self_repair_scale = self_repair_scale,
+                                                          norm_target_rms = final_layer_normalize_target)
+    elif nonlin_type == "pnorm" :
+        prev_layer_chain = AddAffPnormLayer(config_lines, "Pre_final_chain",
+                                                         input, nonlin_input_dim, nonlin_output_dim,
+                                                         norm_target_rms = final_layer_normalize_target)
+
+        prev_layer_xent = AddAffPnormLayer(config_lines, "Pre_final_xent",
+                                                        input, nonlin_input_dim, nonlin_output_dim,
+                                                        norm_target_rms = final_layer_normalize_target)
+    else:
+        raise Exception("Unknown nonlinearity type")
+
+    prev_layer_output_chain = prev_layer_chain['output']
+    prev_layer_output_xent = prev_layer_xent['output']
+
+    num_learnable_params += prev_layer_chain['num_learnable_params']
+    num_learnable_params_xent += prev_layer_xent['num_learnable_params']
+
+    num_learnable_params += AddFinalLayer(config_lines, prev_layer_output_chain, num_targets,
+                                              use_presoftmax_prior_scale = use_presoftmax_prior_scale,
+                                              prior_scale_file = prior_scale_file,
+                                              include_log_softmax = include_log_softmax)
+
+    # This block prints the configs for a separate output that will be
+    # trained with a cross-entropy objective in the 'chain' models... this
+    # has the effect of regularizing the hidden parts of the model.  we use
+    # 0.5 / args.xent_regularize as the learning rate factor- the factor of
+    # 1.0 / args.xent_regularize is suitable as it means the xent
+    # final-layer learns at a rate independent of the regularization
+    # constant; and the 0.5 was tuned so as to make the relative progress
+    # similar in the xent and regular final layers.
+    num_learnable_params_xent += AddFinalLayer(config_lines, prev_layer_output_xent, num_targets,
+                                                   ng_affine_options = " param-stddev=0 bias-stddev=0 learning-rate-factor={0} ".format(
+                                                   0.5 / xent_regularize),
+                                                   use_presoftmax_prior_scale = use_presoftmax_prior_scale,
+                                                   prior_scale_file = prior_scale_file,
+                                                   include_log_softmax = True,
+                                                   name_affix = 'xent')
+
+    return [num_learnable_params, num_learnable_params_xent]
+
+def AddFinalLayerWithXentRegularizer(config_lines, input, num_targets,
+                                     nonlin_type, nonlin_input_dim, nonlin_output_dim,
+                                     use_presoftmax_prior_scale,
+                                     prior_scale_file,
+                                     include_log_softmax,
+                                     self_repair_scale,
+                                     xent_regularize,
+                                     add_final_sigmoid,
+                                     objective_type):
+
+    # add_final_sigmoid adds a sigmoid as a final layer as alternative
+    # to log-softmax layer.
+    # http://ufldl.stanford.edu/wiki/index.php/Softmax_Regression#Softmax_Regression_vs._k_Binary_Classifiers
+    # This is useful when you need the final outputs to be probabilities between 0 and 1.
+    # Usually used with an objective-type such as "quadratic".
+    # Applications are k-binary classification such Ideal Ratio Mask prediction.
+    num_learnable_params = AddFinalLayer(config_lines, input, num_targets,
+                       use_presoftmax_prior_scale = use_presoftmax_prior_scale,
+                       prior_scale_file = prior_scale_file,
+                       include_log_softmax = include_log_softmax,
+                       add_final_sigmoid = add_final_sigmoid,
+                       objective_type = objective_type)
+
+    if xent_regularize != 0.0:
+        # This block prints the configs for a separate output that will be
+        # trained with a cross-entropy objective in the 'chain' models... this
+        # has the effect of regularizing the hidden parts of the model.  we use
+        # 0.5 / args.xent_regularize as the learning rate factor- the factor of
+        # 1.0 / args.xent_regularize is suitable as it means the xent
+        # final-layer learns at a rate independent of the regularization
+        # constant; and the 0.5 was tuned so as to make the relative progress
+        # similar in the xent and regular final layers.
+        num_learnable_params_xent = AddFinalLayer(config_lines, input, num_targets,
+                            ng_affine_options = " param-stddev=0 bias-stddev=0 learning-rate-factor={0} ".format(
+                                  0.5 / xent_regularize),
+                            use_presoftmax_prior_scale = use_presoftmax_prior_scale,
+                            prior_scale_file = prior_scale_file,
+                            include_log_softmax = True,
+                            name_affix = 'xent')
+
+    return [num_learnable_params, num_learnable_params_xent]
 
 # Note : this method is not a Add*Layer method we don't intend it to be directly called
 # by the top level scripts. The output of this Unit does not follow the expected
@@ -709,7 +988,6 @@ def AddCwrnnRateUnit(config_lines,
             input_descriptor = GetSumDescriptor(list)[0]
     elif input_type == "per-dim-weighted-average":
         prev_layer = AddPerDimAffineLayer(config_lines, name, input, 2 * (unit_time_period - operating_time_period) + 1, time_period = operating_time_period)
-        print(prev_layer)
         input = prev_layer['output']
         num_learnable_params += prev_layer['num_learnable_params']
 

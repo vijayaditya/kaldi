@@ -71,7 +71,7 @@ def GetArgs():
                                 """)
     parser.add_argument("--operating-time-period", type=int,
                         help="The distance between time steps used at CWRNN input", default=1)
-    parser.add_argument("--hidden-dim", type=int,
+    parser.add_argument("--hidden-dim", type=int, default=512,
                         help="dimension of fully-connected layers")
 
     # Natural gradient options

@@ -159,7 +159,7 @@ def ProcessRoundDescriptor(segment, parent_node_name, affix, edge_attributes = N
 
 def ProcessOffsetDescriptor(segment, parent_node_name, affix, edge_attributes = None):
     dot_graph = []
-
+    print(segment)
     label = 'Offset ({0})'.format(segment['arguments'][1])
     style = None
     if edge_attributes is not None:

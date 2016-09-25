@@ -142,7 +142,7 @@ void ComputeSimpleNnetContext(const Nnet &nnet,
 
   // This will crash if the total context (left + right) is greater
   // than window_size.
-  int32 window_size = 100;
+  int32 window_size = 200;
   // by going "<= modulus" instead of "< modulus" we do one more computation
   // than we really need; it becomes a sanity check.
   for (int32 input_start = 0; input_start <= modulus; input_start++)
@@ -299,7 +299,7 @@ void SetLearningRates(const Vector<BaseFloat> &learning_rates,
   KALDI_ASSERT(i == learning_rates.Dim());
 }
 
-void GetLearningRates(const Nnet &nnet, 
+void GetLearningRates(const Nnet &nnet,
                       Vector<BaseFloat> *learning_rates) {
   learning_rates->Resize(NumUpdatableComponents(nnet));
   int32 i = 0;
