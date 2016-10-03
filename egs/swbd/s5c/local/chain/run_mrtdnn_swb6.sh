@@ -2,8 +2,8 @@
 
 set -e
 
-# same as mrtdnn_swb3,
-# but with relu-dim equal to tdnn_7b
+# same as tdnn_7d,
+# but using mrtdnn scripts
 
 # configs for 'chain'
 affix=
@@ -11,8 +11,8 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/mrtdnn_swb4  # Note: _sp will get added to this if $speed_perturb == true.
-decode_iter=
+dir=exp/chain/mrtdnn_swb6  # Note: _sp will get added to this if $speed_perturb == true.
+eecode_iter=
 
 # TDNN options
 # this script uses the new tdnn config generator so it needs a final 0 to reflect that the final layer input has no splicing
@@ -44,6 +44,9 @@ where "nvcc" is installed.
 EOF
 fi
 
+if [[ $(hostname -f) == *.clsp.jhu.edu ]]; then
+  cmd_opts=" --config conf/queue_only_k80.conf --only-k80 true"
+fi
 # The iVector-extraction and feature-dumping parts are the same as the standard
 # nnet3 setup, and you can skip them by setting "--stage 8" if you have already
 # run those things.
@@ -110,9 +113,7 @@ if [ $stage -le 12 ]; then
     --feat-dir data/${train_set}_hires \
     --ivector-dir exp/nnet3/ivectors_${train_set} \
     --tree-dir $treedir \
-    --ratewise-params "{'T1': {'rate':1.0/3},
-                        'T2': {'rate':1.0/6},
-                        'T3': {'rate':1.0/9}}" \
+    --ratewise-params "{'T1': {'rate':1.0/3}}" \
     --self-repair-scale-nonlinearity 0.00001 \
     --operating-time-period 3 \
     --relu-dim 625 \
@@ -123,6 +124,7 @@ if [ $stage -le 12 ]; then
     --xent-separate-forward-affine true \
     --include-log-softmax false \
     --final-layer-normalize-target 0.5 \
+    --add-pda-type 2 \
     $dir/configs || exit 1;
 fi
 
@@ -133,7 +135,7 @@ if [ $stage -le 13 ]; then
   fi
 
   steps/nnet3/chain/train.py --stage $train_stage \
-    --cmd "$decode_cmd" \
+    --cmd "$decode_cmd $cmd_opts " \
     --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
@@ -147,14 +149,14 @@ if [ $stage -le 13 ]; then
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
     --egs.dir "$common_egs_dir" \
-    --trainer.num-chunk-per-minibatch 64 \
+    --trainer.num-chunk-per-minibatch 128 \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs 4 \
     --trainer.optimization.num-jobs-initial 3 \
     --trainer.optimization.num-jobs-final 16 \
     --trainer.optimization.initial-effective-lrate 0.001 \
     --trainer.optimization.final-effective-lrate 0.0001 \
-    --trainer.max-param-change 1.414 \
+    --trainer.max-param-change 2.0 \
     --cleanup.remove-egs $remove_egs \
     --feat-dir data/${train_set}_hires \
     --tree-dir $treedir \

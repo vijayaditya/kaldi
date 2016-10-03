@@ -186,9 +186,12 @@ if [ $stage -le 15 ]; then
   iter_opts=
   if [ ! -z $decode_iter ]; then
     iter_opts=" --iter $decode_iter "
+    decode_dir_affix="${decode_dir_affix}iter$decode_iter"
+    scoring_opts=" $scoring_opts --iter $decode_iter "
   fi
   for decode_set in train_dev eval2000; do
       (
+      false && {
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj 50 --cmd "$decode_cmd" $iter_opts \
           --extra-left-context $extra_left_context  \
@@ -196,8 +199,9 @@ if [ $stage -le 15 ]; then
           --frames-per-chunk "$frames_per_chunk" \
           --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_dir_affix:+_$decode_dir_affix}_${decode_suff} || exit 1;
+    }
       if $has_fisher; then
-          steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
+          steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" $iter_opts \
             data/lang_sw1_{tg,fsh_fg} data/${decode_set}_hires \
             $dir/decode_${decode_set}${decode_dir_affix:+_$decode_dir_affix}_sw1_{tg,fsh_fg} || exit 1;
       fi

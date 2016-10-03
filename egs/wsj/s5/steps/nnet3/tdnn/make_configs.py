@@ -324,7 +324,8 @@ def MakeConfigs(config_dir, splice_indexes_string,
     config_lines = {'components':[], 'component-nodes':[]}
 
     config_files={}
-    prev_layer_output = nodes.AddInputLayer(config_lines, feat_dim, splice_indexes[0], ivector_dim)
+    prev_layer = nodes.AddInputLayer(config_lines, feat_dim, splice_indexes[0], ivector_dim)
+    prev_layer_output = prev_layer['output']
 
     # Add the init config lines for estimating the preconditioning matrices
     init_config_lines = copy.deepcopy(config_lines)
@@ -334,11 +335,13 @@ def MakeConfigs(config_dir, splice_indexes_string,
     config_files[config_dir + '/init.config'] = init_config_lines
 
     if cnn_layer is not None:
-        prev_layer_output = AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir,
+        prev_layer = AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir,
                                          feat_dim, splice_indexes[0], ivector_dim)
+        prev_layer_output = prev_layer['output']
 
     if add_lda:
-        prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, config_dir + '/lda.mat')
+        prev_layer = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, config_dir + '/lda.mat')
+        prev_layer_output = prev_layer['output']
 
     left_context = 0
     right_context = 0
@@ -385,23 +388,27 @@ def MakeConfigs(config_dir, splice_indexes_string,
                 raise Exception("xent-separate-forward-affine=True is valid only if xent-regularize is non-zero")
 
             if nonlin_type == "relu" :
-                prev_layer_output_chain = nodes.AddAffRelNormLayer(config_lines, "Tdnn_pre_final_chain",
+                prev_layer_chain = nodes.AddAffRelNormLayer(config_lines, "Tdnn_pre_final_chain",
                                                                    prev_layer_output, nonlin_output_dim,
                                                                    self_repair_scale = self_repair_scale,
                                                                    norm_target_rms = final_layer_normalize_target)
+                prev_layer_output_chain = prev_layer_chain['output']
 
-                prev_layer_output_xent = nodes.AddAffRelNormLayer(config_lines, "Tdnn_pre_final_xent",
+                prev_layer_xent = nodes.AddAffRelNormLayer(config_lines, "Tdnn_pre_final_xent",
                                                                   prev_layer_output, nonlin_output_dim,
                                                                   self_repair_scale = self_repair_scale,
                                                                   norm_target_rms = final_layer_normalize_target)
+                prev_layer_output_xent = prev_layer_xent['output']
             elif nonlin_type == "pnorm" :
-                prev_layer_output_chain = nodes.AddAffPnormLayer(config_lines, "Tdnn_pre_final_chain",
+                prev_layer_chain = nodes.AddAffPnormLayer(config_lines, "Tdnn_pre_final_chain",
                                                                  prev_layer_output, nonlin_input_dim, nonlin_output_dim,
                                                                  norm_target_rms = final_layer_normalize_target)
+                prev_layer_output_chain = prev_layer_chain['output']
 
-                prev_layer_output_xent = nodes.AddAffPnormLayer(config_lines, "Tdnn_pre_final_xent",
+                prev_layer_xent = nodes.AddAffPnormLayer(config_lines, "Tdnn_pre_final_xent",
                                                                 prev_layer_output, nonlin_input_dim, nonlin_output_dim,
                                                                 norm_target_rms = final_layer_normalize_target)
+                prev_layer_output_xent = prev_layer_xent['output']
             else:
                 raise Exception("Unknown nonlinearity type")
 
@@ -419,14 +426,16 @@ def MakeConfigs(config_dir, splice_indexes_string,
                                 name_affix = 'xent')
         else:
             if nonlin_type == "relu":
-                prev_layer_output = nodes.AddAffRelNormLayer(config_lines, "Tdnn_{0}".format(i),
+                prev_layer = nodes.AddAffRelNormLayer(config_lines, "Tdnn_{0}".format(i),
                                                             prev_layer_output, nonlin_output_dim,
                                                             self_repair_scale = self_repair_scale,
                                                             norm_target_rms = 1.0 if i < num_hidden_layers -1 else final_layer_normalize_target)
+                prev_layer_output = prev_layer['output']
             elif nonlin_type == "pnorm":
-                prev_layer_output = nodes.AddAffPnormLayer(config_lines, "Tdnn_{0}".format(i),
+                prev_layer = nodes.AddAffPnormLayer(config_lines, "Tdnn_{0}".format(i),
                                                            prev_layer_output, nonlin_input_dim, nonlin_output_dim,
                                                            norm_target_rms = 1.0 if i < num_hidden_layers -1 else final_layer_normalize_target)
+                prev_layer_output = prev_layer['output']
             else:
                 raise Exception("Unknown nonlinearity type")
             # a final layer is added after each new layer as we are generating

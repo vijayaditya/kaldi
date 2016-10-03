@@ -17,7 +17,7 @@ set -e
 
 # configs for 'chain'
 stage=12
-train_stage=-10
+train_stage=-4
 get_egs_stage=-10
 speed_perturb=true
 dir=exp/chain/lstm_6i  # Note: _sp will get added to this if $speed_perturb == true.
@@ -38,7 +38,7 @@ extra_right_context=0
 frames_per_chunk=
 
 remove_egs=false
-common_egs_dir=
+common_egs_dir=exp/chain/lstm_6j_sp/egs
 
 affix=
 # End configuration section.
@@ -129,7 +129,8 @@ if [ $stage -le 12 ]; then
     --recurrent-projection-dim 256 \
     --non-recurrent-projection-dim 256 \
     --label-delay $label_delay \
-    --self-repair-scale 0.00001 \
+    --self-repair-scale-nonlinearity 0.00001 \
+    --self-repair-scale-clipgradient 1.0 \
    $dir/configs || exit 1;
 
 fi

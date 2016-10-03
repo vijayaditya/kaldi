@@ -19,6 +19,7 @@
 
 #include <iterator>
 #include <sstream>
+#include <time.h>
 #include "nnet3/nnet-compute.h"
 
 namespace kaldi {
@@ -99,8 +100,10 @@ void NnetComputer::DebugBeforeExecute(int32 command,
 
 
 void NnetComputer::DebugAfterExecute(int32 command,
-                                     const CommandDebugInfo &info) {
+                                     const CommandDebugInfo &info,
+                                     BaseFloat command_start_time) {
   std::ostringstream os;
+  BaseFloat run_time = (static_cast<BaseFloat>(clock()) - command_start_time) / CLOCKS_PER_SEC;
   os << command_strings_[command] << "\t|\t";
   {
     const std::vector<int32> &matrices_written =
@@ -139,6 +142,7 @@ void NnetComputer::DebugAfterExecute(int32 command,
          << "->" << ParameterStddev(*component) << " ";
     }
   }
+  os << "\t|\t time: " << run_time << " secs";
   KALDI_LOG << os.str();
 }
 
@@ -355,14 +359,18 @@ void NnetComputer::Forward() {
   int32 size = computation_.commands.size(), i = 0;
   const std::vector<NnetComputation::Command> &c = computation_.commands;
   CommandDebugInfo info;
+  clock_t start_time = 0;
 
   for (; i < size && c[i].command_type != kNoOperationMarker;
        i++) {
-    if (debug_)
+    if (debug_) {
       DebugBeforeExecute(i, &info);
+      start_time = clock();
+    }
     ExecuteCommand(i);
     if (debug_)
-      DebugAfterExecute(i, info);
+      DebugAfterExecute(i, info, start_time);
+
   }
 
 }
@@ -375,12 +383,15 @@ void NnetComputer::Backward() {
   for (; i < size && c[i].command_type != kNoOperationMarker;
        i++);
   CommandDebugInfo info;
+  clock_t start_time = 0;
   for (; i < size; i++) {
-    if (debug_)
+    if (debug_) {
       DebugBeforeExecute(i, &info);
+      start_time = clock();
+    }
     ExecuteCommand(i);
     if (debug_)
-      DebugAfterExecute(i, info);
+      DebugAfterExecute(i, info, start_time);
   }
 }
 

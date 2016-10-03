@@ -2,8 +2,10 @@
 
 set -e
 
-# same as mrtdnn_swb3,
-# but with relu-dim equal to tdnn_7b
+# same as mrtdnn_swb2, but the slow-rates-optional parameter is added
+# this is used to fix the maximum context we want to train with
+# I learnt that I should not apply Offset after Round, so the run times are long
+# see mrtdnn_swb7 for better speed tests
 
 # configs for 'chain'
 affix=
@@ -11,7 +13,7 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/mrtdnn_swb4  # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/mrtdnn_swb7  # Note: _sp will get added to this if $speed_perturb == true.
 decode_iter=
 
 # TDNN options
@@ -115,7 +117,7 @@ if [ $stage -le 12 ]; then
                         'T3': {'rate':1.0/9}}" \
     --self-repair-scale-nonlinearity 0.00001 \
     --operating-time-period 3 \
-    --relu-dim 625 \
+    --relu-dim 384 \
     --splice-indexes "-1,0,1 -3,0,3 -3,0,3 -3,0,3 -3,0,3 -6,-3,0 0" \
     --slow-rate-optional true \
     --use-presoftmax-prior-scale false \
@@ -123,6 +125,7 @@ if [ $stage -le 12 ]; then
     --xent-separate-forward-affine true \
     --include-log-softmax false \
     --final-layer-normalize-target 0.5 \
+    --add-pda-type 2 \
     $dir/configs || exit 1;
 fi
 
@@ -147,14 +150,14 @@ if [ $stage -le 13 ]; then
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
     --egs.dir "$common_egs_dir" \
-    --trainer.num-chunk-per-minibatch 64 \
+    --trainer.num-chunk-per-minibatch 128 \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs 4 \
     --trainer.optimization.num-jobs-initial 3 \
     --trainer.optimization.num-jobs-final 16 \
     --trainer.optimization.initial-effective-lrate 0.001 \
     --trainer.optimization.final-effective-lrate 0.0001 \
-    --trainer.max-param-change 1.414 \
+    --trainer.max-param-change 2.0 \
     --cleanup.remove-egs $remove_egs \
     --feat-dir data/${train_set}_hires \
     --tree-dir $treedir \

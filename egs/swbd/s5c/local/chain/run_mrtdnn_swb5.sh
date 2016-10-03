@@ -11,7 +11,7 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/mrtdnn_swb4  # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/mrtdnn_swb5  # Note: _sp will get added to this if $speed_perturb == true.
 decode_iter=
 
 # TDNN options
@@ -44,6 +44,9 @@ where "nvcc" is installed.
 EOF
 fi
 
+if [[ $(hostname -f) == *.clsp.jhu.edu ]]; then
+  cmd_opts=" --config conf/queue_only_k80.conf --only-k80 true"
+fi
 # The iVector-extraction and feature-dumping parts are the same as the standard
 # nnet3 setup, and you can skip them by setting "--stage 8" if you have already
 # run those things.
@@ -123,6 +126,7 @@ if [ $stage -le 12 ]; then
     --xent-separate-forward-affine true \
     --include-log-softmax false \
     --final-layer-normalize-target 0.5 \
+    --add-pda-type 2 \
     $dir/configs || exit 1;
 fi
 
@@ -133,7 +137,7 @@ if [ $stage -le 13 ]; then
   fi
 
   steps/nnet3/chain/train.py --stage $train_stage \
-    --cmd "$decode_cmd" \
+    --cmd "$decode_cmd $cmd_opts " \
     --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
@@ -147,14 +151,14 @@ if [ $stage -le 13 ]; then
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
     --egs.dir "$common_egs_dir" \
-    --trainer.num-chunk-per-minibatch 64 \
+    --trainer.num-chunk-per-minibatch 128 \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs 4 \
     --trainer.optimization.num-jobs-initial 3 \
     --trainer.optimization.num-jobs-final 16 \
     --trainer.optimization.initial-effective-lrate 0.001 \
     --trainer.optimization.final-effective-lrate 0.0001 \
-    --trainer.max-param-change 1.414 \
+    --trainer.max-param-change 2.0 \
     --cleanup.remove-egs $remove_egs \
     --feat-dir data/${train_set}_hires \
     --tree-dir $treedir \

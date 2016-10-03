@@ -8,6 +8,7 @@
 # Begin configuration section.
 cmd=run.pl
 skip_scoring=false
+iter=final
 stage=1
 scoring_opts=
 # End configuration section.
@@ -62,7 +63,8 @@ fi
 if ! $skip_scoring && [ $stage -le 2 ]; then
   err_msg="Not scoring because local/score.sh does not exist or not executable."
   [ ! -x local/score.sh ] && echo $err_msg && exit 1;
-  local/score.sh --cmd "$cmd" $scoring_opts $data $newlang $outdir
+  [ "$iter" != "final" ] && iter_opt="--iter $iter"
+  local/score.sh --cmd "$cmd" $iter_opt $scoring_opts $data $newlang $outdir
 else
   echo "Not scoring because requested so..."
 fi

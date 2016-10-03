@@ -43,7 +43,7 @@ minibatch_size=128
 relu_dim=625
 frames_per_eg=150
 remove_egs=false
-common_egs_dir=
+common_egs_dir=exp/chain/mrtdnn_swb3_sp/egs/
 xent_regularize=0.1
 
 # End configuration section.
@@ -162,6 +162,7 @@ if [ $stage -le 13 ]; then
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-width $frames_per_eg \
+    --egs.dir "$common_egs_dir" \
     --trainer.num-chunk-per-minibatch $minibatch_size \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs $num_epochs \

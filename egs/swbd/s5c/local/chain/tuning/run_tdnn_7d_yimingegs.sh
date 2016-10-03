@@ -1,9 +1,21 @@
 #!/bin/bash
 
-set -e
+# 7d is as 7b, but changing the HMM context from triphone to left biphone.
 
-# same as mrtdnn_swb3,
-# but with relu-dim equal to tdnn_7b
+# Left biphone model turns out to be as good as triphone model.
+# local/chain/compare_wer.sh 7b 7d
+# System                       7b        7d
+# WER on train_dev(tg)      15.10     15.03
+# WER on train_dev(fg)      14.21     14.22
+# WER on eval2000(tg)        17.2      17.4
+# WER on eval2000(fg)        15.9      15.9
+# Final train prob      -0.100551 -0.092629
+# Final valid prob      -0.123914  -0.11354
+# Final train prob (xent)      -1.43215  -1.27932
+# Final valid prob (xent)      -1.46662  -1.33193
+# Real-time factor       0.918978  0.711695
+
+set -e
 
 # configs for 'chain'
 affix=
@@ -11,28 +23,33 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/mrtdnn_swb4  # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/tdnn_7d_yimingegs  # Note: _sp will get added to this if $speed_perturb == true.
 decode_iter=
 
 # TDNN options
 # this script uses the new tdnn config generator so it needs a final 0 to reflect that the final layer input has no splicing
 # smoothing options
+self_repair_scale=0.00001
 # training options
+num_epochs=4
+initial_effective_lrate=0.001
+final_effective_lrate=0.0001
 leftmost_questions_truncate=-1
+max_param_change=2.0
+final_layer_normalize_target=0.5
+num_jobs_initial=3
+num_jobs_final=16
+minibatch_size=128
+relu_dim=625
+frames_per_eg=150
 remove_egs=false
-common_egs_dir=exp/chain/mrtdnn_swb3_sp/egs/
+common_egs_dir=exp/chain/tdnn_7d_sp_yiming/egs/
 xent_regularize=0.1
-
-chunk_left_context=40
-chunk_right_context=40
-
-extra_left_context=
-extra_right_context=
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
 
-. ./cmd.sh
+. cmd.sh
 . ./path.sh
 . ./utils/parse_options.sh
 
@@ -101,30 +118,31 @@ fi
 
 if [ $stage -le 12 ]; then
   echo "$0: creating neural net configs";
+  if [ ! -z "$relu_dim" ]; then
+    dim_opts="--relu-dim $relu_dim"
+  else
+    dim_opts="--pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
+  fi
 
   # create the config files for nnet initialization
   repair_opts=${self_repair_scale:+" --self-repair-scale-nonlinearity $self_repair_scale "}
 
-  steps/nnet3/mrtdnn/make_configs.py \
+  steps/nnet3/tdnn/make_configs.py \
     $repair_opts \
     --feat-dir data/${train_set}_hires \
     --ivector-dir exp/nnet3/ivectors_${train_set} \
     --tree-dir $treedir \
-    --ratewise-params "{'T1': {'rate':1.0/3},
-                        'T2': {'rate':1.0/6},
-                        'T3': {'rate':1.0/9}}" \
-    --self-repair-scale-nonlinearity 0.00001 \
-    --operating-time-period 3 \
-    --relu-dim 625 \
-    --splice-indexes "-1,0,1 -3,0,3 -3,0,3 -3,0,3 -3,0,3 -6,-3,0 0" \
-    --slow-rate-optional true \
+    $dim_opts \
+    --splice-indexes "-1,0,1 -1,0,1,2 -3,0,3 -3,0,3 -3,0,3 -6,-3,0 0" \
     --use-presoftmax-prior-scale false \
     --xent-regularize $xent_regularize \
     --xent-separate-forward-affine true \
     --include-log-softmax false \
-    --final-layer-normalize-target 0.5 \
+    --final-layer-normalize-target $final_layer_normalize_target \
     $dir/configs || exit 1;
 fi
+
+
 
 if [ $stage -le 13 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
@@ -143,18 +161,16 @@ if [ $stage -le 13 ]; then
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0" \
-    --egs.chunk-width 150 \
-    --egs.chunk-left-context $chunk_left_context \
-    --egs.chunk-right-context $chunk_right_context \
+    --egs.chunk-width $frames_per_eg \
     --egs.dir "$common_egs_dir" \
-    --trainer.num-chunk-per-minibatch 64 \
+    --trainer.num-chunk-per-minibatch $minibatch_size \
     --trainer.frames-per-iter 1500000 \
-    --trainer.num-epochs 4 \
-    --trainer.optimization.num-jobs-initial 3 \
-    --trainer.optimization.num-jobs-final 16 \
-    --trainer.optimization.initial-effective-lrate 0.001 \
-    --trainer.optimization.final-effective-lrate 0.0001 \
-    --trainer.max-param-change 1.414 \
+    --trainer.num-epochs $num_epochs \
+    --trainer.optimization.num-jobs-initial $num_jobs_initial \
+    --trainer.optimization.num-jobs-final $num_jobs_final \
+    --trainer.optimization.initial-effective-lrate $initial_effective_lrate \
+    --trainer.optimization.final-effective-lrate $final_effective_lrate \
+    --trainer.max-param-change $max_param_change \
     --cleanup.remove-egs $remove_egs \
     --feat-dir data/${train_set}_hires \
     --tree-dir $treedir \
@@ -173,25 +189,20 @@ fi
 decode_suff=sw1_tg
 graph_dir=$dir/graph_sw1_tg
 if [ $stage -le 15 ]; then
-  [ -z $extra_left_context ] && extra_left_context=$chunk_left_context;
-  [ -z $extra_right_context ] && extra_right_context=$chunk_right_context;
   iter_opts=
   if [ ! -z $decode_iter ]; then
     iter_opts=" --iter $decode_iter "
-    decode_dir_affix="${decode_dir_affix}iter$decode_iter"
   fi
   for decode_set in train_dev eval2000; do
       (
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj 50 --cmd "$decode_cmd" $iter_opts \
-          --extra-left-context $extra_left_context  \
-          --extra-right-context $extra_right_context  \
           --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
-          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_dir_affix:+_$decode_dir_affix}_${decode_suff} || exit 1;
+          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_${decode_suff} || exit 1;
       if $has_fisher; then
           steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
             data/lang_sw1_{tg,fsh_fg} data/${decode_set}_hires \
-            $dir/decode_${decode_set}${decode_dir_affix:+_$decode_dir_affix}_sw1_{tg,fsh_fg} || exit 1;
+            $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_sw1_{tg,fsh_fg} || exit 1;
       fi
       ) &
   done

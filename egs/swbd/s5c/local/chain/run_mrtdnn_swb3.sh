@@ -4,6 +4,8 @@ set -e
 
 # same as mrtdnn_swb2, but the slow-rates-optional parameter is added
 # this is used to fix the maximum context we want to train with
+# I learnt that I should not apply Offset after Round, so the run times are long
+# see mrtdnn_swb7 for better speed tests
 
 # configs for 'chain'
 affix=
@@ -178,6 +180,7 @@ if [ $stage -le 15 ]; then
   iter_opts=
   if [ ! -z $decode_iter ]; then
     iter_opts=" --iter $decode_iter "
+    decode_dir_affix="${decode_dir_affix}iter$decode_iter"
   fi
   for decode_set in train_dev eval2000; do
       (
@@ -186,11 +189,11 @@ if [ $stage -le 15 ]; then
           --extra-left-context $extra_left_context  \
           --extra-right-context $extra_right_context  \
           --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
-          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_${decode_suff} || exit 1;
+          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_dir_affix:+_$decode_dir_affix}_${decode_suff} || exit 1;
       if $has_fisher; then
           steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
             data/lang_sw1_{tg,fsh_fg} data/${decode_set}_hires \
-            $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_sw1_{tg,fsh_fg} || exit 1;
+            $dir/decode_${decode_set}${decode_dir_affix:+_$decode_dir_affix}_sw1_{tg,fsh_fg} || exit 1;
       fi
       ) &
   done

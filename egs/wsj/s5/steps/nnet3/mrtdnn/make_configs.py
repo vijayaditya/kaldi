@@ -101,6 +101,9 @@ def GetArgs():
     parser.add_argument("config_dir",
                         help="Directory to write config files and variables")
 
+    # tuning params : should be deleted later
+    parser.add_argument("--add-pda-type", type=int, default = 1)
+
     print(' '.join(sys.argv))
 
     args = parser.parse_args()
@@ -231,7 +234,8 @@ def MakeConfigs(config_dir, splice_indexes_string,
                 xent_regularize,
                 xent_separate_forward_affine,
                 self_repair_scale,
-                objective_type):
+                objective_type,
+                add_pda_type):
 
     parsed_splice_output = ParseSpliceString(splice_indexes_string.strip())
     left_context = parsed_splice_output['left_context']
@@ -301,25 +305,38 @@ def MakeConfigs(config_dir, splice_indexes_string,
                 prev_layer = nodes.AddAffineNonlinLayer(config_lines, 'Affine_{0}'.format(i),
                                                   prev_layer_output,
                                                   nonlin_type, nonlin_input_dim, nonlin_output_dim,
-                                                  self_repair_scale,
+                                                  self_repair_scale = self_repair_scale,
                                                   norm_target_rms = 1.0 if i < num_hidden_layers -1 else final_layer_normalize_target)
             else :
                 # penultimate layer can't be mrtdnn
                 # this is not necessarily a major constraint
                 assert(i < num_hidden_layers - 1)
                 # add a mrtdnn layer
-                prev_layer = nodes.AddMultiRateTdnnLayer(config_lines, 'Mrtdnn_{0}'.format(i),
-                                                    prev_layer_output,
-                                                    rate_params = rate_params,
-                                                    splice_indexes = splice_indexes[i],
-                                                    nonlin_type = nonlin_type,
-                                                    nonlin_input_dim = nonlin_input_dim,
-                                                    nonlin_output_dim = nonlin_output_dim,
-                                                    operating_time_period = operating_time_period,
-                                                    slow_rate_optional = slow_rate_optional,
-                                                    self_repair_scale = self_repair_scale,
-                                                    norm_target_rms = 1.0)
-                print(prev_layer)
+                if add_pda_type == 1:
+                    prev_layer = nodes.AddMultiRateTdnnLayer(config_lines, 'Mrtdnn_{0}'.format(i),
+                                                        prev_layer_output,
+                                                        rate_params = rate_params,
+                                                        splice_indexes = splice_indexes[i],
+                                                        nonlin_type = nonlin_type,
+                                                        nonlin_input_dim = nonlin_input_dim,
+                                                        nonlin_output_dim = nonlin_output_dim,
+                                                        operating_time_period = operating_time_period,
+                                                        slow_rate_optional = slow_rate_optional,
+                                                        self_repair_scale = self_repair_scale,
+                                                        norm_target_rms = 1.0)
+                elif add_pda_type == 2:
+                    prev_layer = nodes.AddMultiRateTdnnLayer2(config_lines, 'Mrtdnn_{0}'.format(i),
+                                                        prev_layer_output,
+                                                        rate_params = rate_params,
+                                                        splice_indexes = splice_indexes[i],
+                                                        nonlin_type = nonlin_type,
+                                                        nonlin_input_dim = nonlin_input_dim,
+                                                        nonlin_output_dim = nonlin_output_dim,
+                                                        operating_time_period = operating_time_period,
+                                                        slow_rate_optional = slow_rate_optional,
+                                                        self_repair_scale = self_repair_scale,
+                                                        norm_target_rms = 1.0)
+
                 left_context += prev_layer['left_context']
                 right_context += prev_layer['right_context']
 
@@ -395,7 +412,8 @@ def Main():
                 xent_regularize = args.xent_regularize,
                 xent_separate_forward_affine = args.xent_separate_forward_affine,
                 self_repair_scale = args.self_repair_scale_nonlinearity,
-                objective_type = args.objective_type)
+                objective_type = args.objective_type,
+                add_pda_type = args.add_pda_type)
 
 if __name__ == "__main__":
     Main()

@@ -16,8 +16,8 @@
 set -e
 
 # configs for 'chain'
-stage=12
-train_stage=-10
+stage=13
+train_stage=6
 get_egs_stage=-10
 speed_perturb=true
 dir=exp/chain/blstm_6i  # Note: _sp will get added to this if $speed_perturb == true.
@@ -56,6 +56,9 @@ where "nvcc" is installed.
 EOF
 fi
 
+if [[ $(hostname -f) == *.clsp.jhu.edu ]]; then
+  cmd_opts=" --config conf/queue_only_k80.conf --only-k80 true"
+fi
 # The iVector-extraction and feature-dumping parts are the same as the standard
 # nnet3 setup, and you can skip them by setting "--stage 8" if you have already
 # run those things.
@@ -129,7 +132,8 @@ if [ $stage -le 12 ]; then
     --recurrent-projection-dim 256 \
     --non-recurrent-projection-dim 256 \
     --label-delay $label_delay \
-    --self-repair-scale 0.00001 \
+    --self-repair-scale-nonlinearity 0.00001 \
+    --self-repair-scale-clipgradient 1.0 \
    $dir/configs || exit 1;
 
 fi
@@ -141,7 +145,7 @@ if [ $stage -le 13 ]; then
   fi
 
   steps/nnet3/chain/train.py --stage $train_stage \
-    --cmd "$decode_cmd" \
+    --cmd "$decode_cmd $cmd_opts " \
     --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
@@ -150,7 +154,7 @@ if [ $stage -le 13 ]; then
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --chain.left-deriv-truncate 0 \
-    --trainer.num-chunk-per-minibatch 64 \
+    --trainer.num-chunk-per-minibatch 128 \
     --trainer.frames-per-iter 1200000 \
     --trainer.max-param-change 2.0 \
     --trainer.num-epochs 4 \
