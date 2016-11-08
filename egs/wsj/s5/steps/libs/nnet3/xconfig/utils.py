@@ -6,14 +6,16 @@
 # while xconfig_layers.py contains the code specific to layer types.
 
 from __future__ import print_function
-import subprocess
-import logging
-import math
 import re
 import sys
-import traceback
-import time
-import argparse
+
+
+class XconfigParserError(RuntimeError):
+    def __init__(self, error_msg, conf_line):
+        self.msg = 'While parsing "{c}" :{e}'.format(c=conf_line, e=error_msg)
+
+    def __str__(self):
+        return self.msg
 
 # [utility function used in xconfig_layers.py]
 # Given a list of objects of type XconfigLayerBase ('all_layers'),
@@ -23,6 +25,7 @@ import argparse
 # (which is an alias for the previous layer).
 def GetPrevNames(all_layers, current_layer):
     prev_names = []
+    print(all_layers)
     for layer in all_layers:
         if layer is current_layer:
             break
@@ -30,7 +33,7 @@ def GetPrevNames(all_layers, current_layer):
     prev_names_set = set()
     for name in prev_names:
         if name in prev_names_set:
-            raise RuntimeError("{0}: Layer name {1} is used more than once.".format(
+            raise XconfigParserError("{0}: Layer name {1} is used more than once.".format(
                     sys.argv[0], name))
         prev_names_set.add(name)
     return prev_names
@@ -45,7 +48,7 @@ def GetDimFromLayerName(all_layers, current_layer, full_layer_name):
     assert isinstance(full_layer_name, str)
     split_name = full_layer_name.split('.')
     if len(split_name) == 0:
-        raise RuntimeError("Bad layer name: " + full_layer_name)
+        raise XconfigParserError("Bad layer name: " + full_layer_name)
     layer_name = split_name[0]
     if len(split_name) == 1:
         qualifier = None
@@ -59,16 +62,16 @@ def GetDimFromLayerName(all_layers, current_layer, full_layer_name):
             break
         if layer.Name() == layer_name:
             if not qualifier in layer.Qualifiers():
-                raise RuntimeError("Layer '{0}' has no such qualifier: '{1}' ({0}.{1})".format(
+                raise XconfigParserError("Layer '{0}' has no such qualifier: '{1}' ({0}.{1})".format(
                     layer_name, qualifier))
             return layer.OutputDim(qualifier)
     # No such layer was found.
     if layer_name in [ layer.Name() for layer in all_layers ]:
-        raise RuntimeError("Layer '{0}' was requested before it appeared in "
+        raise XconfigParserError("Layer '{0}' was requested before it appeared in "
                         "the xconfig file (circular dependencies or out-of-order "
                         "layers".format(layer_name))
     else:
-        raise RuntimeError("No such layer: '{0}'".format(layer_name))
+        raise XconfigParserError("No such layer: '{0}'".format(layer_name))
 
 
 # [utility function used in xconfig_layers.py]
@@ -82,7 +85,7 @@ def GetStringFromLayerName(all_layers, current_layer, full_layer_name):
     assert isinstance(full_layer_name, str)
     split_name = full_layer_name.split('.')
     if len(split_name) == 0:
-        raise RuntimeError("Bad layer name: " + full_layer_name)
+        raise XconfigParserError("Bad layer name: " + full_layer_name)
     layer_name = split_name[0]
     if len(split_name) == 1:
         qualifier = None
@@ -96,16 +99,16 @@ def GetStringFromLayerName(all_layers, current_layer, full_layer_name):
             break
         if layer.Name() == layer_name:
             if not qualifier in layer.Qualifiers():
-                raise RuntimeError("Layer '{0}' has no such qualifier: '{1}' ({0}.{1})".format(
+                raise XconfigParserError("Layer '{0}' has no such qualifier: '{1}' ({0}.{1})".format(
                     layer_name, qualifier))
             return layer.OutputName(qualifier)
     # No such layer was found.
     if layer_name in [ layer.Name() for layer in all_layers ]:
-        raise RuntimeError("Layer '{0}' was requested before it appeared in "
+        raise XconfigParserError("Layer '{0}' was requested before it appeared in "
                         "the xconfig file (circular dependencies or out-of-order "
                         "layers".format(layer_name))
     else:
-        raise RuntimeError("No such layer: '{0}'".format(layer_name))
+        raise XconfigParserError("No such layer: '{0}'".format(layer_name))
 
 
 # This function, used in converting string values in config lines to
@@ -450,8 +453,6 @@ def ReplaceBracketExpressionsInDescriptor(descriptor_string,
             out_fields.append(f)
     return ''.join(out_fields)
 
-
-
 # tokenizes 'descriptor_string' into the tokens that may be part of Descriptors.
 # Note: for convenience in parsing, we add the token 'end-of-string' to this
 # list.
@@ -528,7 +529,6 @@ def ParseConfigLine(orig_config_line):
         ans_dict[var_name] = var_value
     return (first_token, ans_dict)
 
-
 # Reads a config file and returns a list of objects, where each object
 # represents one line of the file.
 def ReadConfigFile(filename):
@@ -550,7 +550,6 @@ def ReadConfigFile(filename):
         layer_object = ConfigLineToObject(first_token, key_to_value, prev_names)
         ans.append(layer_object)
         prev_names.append(layer_object.Name())
-
 
 def TestLibrary():
     TokenizeTest = lambda x: TokenizeDescriptor(x)[:-1]  # remove 'end of string'

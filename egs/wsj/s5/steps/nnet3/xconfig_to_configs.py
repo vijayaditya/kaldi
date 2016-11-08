@@ -12,22 +12,21 @@ import imp
 import ast
 from collections import defaultdict
 
-sys.path.insert(0, 'steps/nnet3/libs/')
+sys.path.insert(0, 'steps/')
 # the following is in case we weren't running this from the normal directory.
-sys.path.insert(0, os.path.realpath(os.path.dirname(sys.argv[0])) + '/libs/')
+sys.path.insert(0, os.path.realpath(os.path.dirname(sys.argv[0])) + '/')
 
-import xconfig_utils
-import xconfig_layers
 
+import libs.nnet3.xconfig.parser as xparser
 
 def GetArgs():
     # we add compulsary arguments as named arguments for readability
     parser = argparse.ArgumentParser(description='Reads an xconfig file and creates config files '
                                      'for neural net creation and training',
-                                     epilog='Search egs/*/*/local/nnet3/*sh for examples')
-    parser.add_argument('xconfig_file',
+                                     epilog='Search egs/*/*/local/{nnet3,chain}/*sh for examples')
+    parser.add_argument('--xconfig-file', required=True,
                         help='Filename of input xconfig file')
-    parser.add_argument('config_dir',
+    parser.add_argument('--config-dir', required=True,
                         help='Directory to write config files and variables')
 
     print(' '.join(sys.argv))
@@ -44,10 +43,9 @@ def CheckArgs(args):
 
 
 #     # write the files used by other scripts like steps/nnet3/get_egs.sh
-#     f = open(config_dir + 'vars', 'w')
+#     f = open(config_dir + '/vars', 'w')
 #     print('model_left_context=' + str(left_context), file=f)
 #     print('model_right_context=' + str(right_context), file=f)
-#     print('num_hidden_layers=' + str(num_hidden_layers), file=f)
 #     print('num_targets=' + str(num_targets), file=f)
 #     print('add_lda=' + ('true' if add_lda else 'false'), file=f)
 #     print('include_log_softmax=' + ('true' if include_log_softmax else 'false'), file=f)
@@ -123,9 +121,6 @@ def WriteExpandedXconfigFiles(config_dir, all_layers):
         print(str(layer), file=xconfig_file_out)
     xconfig_file_out.close()
 
-
-
-
 # This function returns a map from config-file basename
 # e.g. 'init', 'ref', 'layer1' to a documentation string that goes
 # at the top of the file.
@@ -146,28 +141,10 @@ def GetConfigHeaders():
                   '# presoftmax-prior-scale, if applicable).  This file\n'
                   '# is used only to work out the left-context and right-context\n'
                   '# of the network.\n');
-    ans['all'] = ('# This file was created by the command:\n'
-                  '# ' + ' '.join(sys.argv) + '\n'
-                  '# It contains the entire neural network.  It might not be used\n'
-                  '# in the current scripts; it\'s provided for forward compatibility\n'
-                  '# to possible future changes.\n')
+    ans['final'] = ('# This file was created by the command:\n'
+                    '# ' + ' '.join(sys.argv) + '\n'
+                    '# It contains the entire neural network.\n')
 
-    # Note: currently we just copy all lines that were going to go to 'all', into
-    # 'layer1', to avoid propagating this nastiness to the code in xconfig_layers.py
-    ans['layer1'] = ('# This file was created by the command:\n'
-                     '# ' + ' '.join(sys.argv) + '\n'
-                     '# It contains the configuration of the entire neural network.\n'
-                     '# The contents are the same\n'
-                     '# as \'all.config\'.  The reason this file is named this way (and\n'
-                     '# that the config file `num_hidden_layers` contains 1, even though\n'
-                     '# this file may really contain more than 1 hidden layer), is\n'
-                     '# historical... we used to create networks by adding hidden layers\n'
-                     '# one by one (discriminative pretraining), but more recently we\n'
-                     '# have found that it\'s better to add them all at once.  This file\n'
-                     '# exists to enable the older training scripts to work.  Note:\n'
-                     '# it contains the inputs of the neural network even though it doesn\'t\n'
-                     '# have to (since they are included in \'init.config\').  This will\n'
-                     '# give us the flexibility to change the scripts in future.\n');
     return ans;
 
 
@@ -188,16 +165,10 @@ def WriteConfigFiles(config_dir, all_layers):
             for config_basename, line in pairs:
                 config_basename_to_lines[config_basename].append(line)
         except Exception as e:
-            print('{0}: error producing config lines from xconfig '
-                     'line \'{1}\': error was: {2}'.format(sys.argv[0], str(layer),
+            print("{0}: error producing config lines from xconfig "
+                    "line '{1}': error was: {2}".format(sys.argv[0], str(layer),
                                                          repr(e)), file=sys.stderr)
             raise(e)
-
-    # currently we don't expect any of the GetFullConfig functions to output to
-    # config-basename 'layer1'... currently we just copy this from
-    # config-basename 'all', for back-compatibility to older scripts.
-    assert not 'layer1' in config_basename_to_lines
-    config_basename_to_lines['layer1'] = config_basename_to_lines['all']
 
     for basename,lines in config_basename_to_lines.items():
         header = config_basename_to_header[basename]
@@ -220,7 +191,7 @@ def WriteConfigFiles(config_dir, all_layers):
 def Main():
     args = GetArgs()
     BackUpXconfigFile(args.xconfig_file, args.config_dir)
-    all_layers = xconfig_layers.ReadXconfigFile(args.xconfig_file)
+    all_layers = xparser.ReadXconfigFile(args.xconfig_file)
     WriteExpandedXconfigFiles(args.config_dir, all_layers)
     WriteConfigFiles(args.config_dir, all_layers)
 
@@ -237,5 +208,3 @@ if __name__ == '__main__':
 # mkdir -p foo; (echo 'input dim=40 name=input'; echo 'relu-renorm-layer name=affine1 dim=1024'; echo 'output-layer name=output dim=1924 input=Append(-1,0,1)')  >xconfig; ./xconfig_to_configs.py xconfig foo
 
 # mkdir -p foo; (echo 'input dim=100 name=ivector'; echo 'input dim=40 name=input'; echo 'fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=foo/bar/lda.mat'; echo 'output-layer name=output dim=1924 input=Append(-1,0,1)')  >xconfig; ./xconfig_to_configs.py xconfig foo
-
-
