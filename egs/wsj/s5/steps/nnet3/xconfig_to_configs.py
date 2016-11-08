@@ -12,12 +12,13 @@ import imp
 import ast
 from collections import defaultdict
 
-sys.path.insert(0, 'steps/nnet3/libs/xconfig')
+sys.path.insert(0, 'steps/nnet3/libs/')
 # the following is in case we weren't running this from the normal directory.
-sys.path.insert(0, os.path.realpath(os.path.dirname(sys.argv[0])) + '/libs/xconfig')
+sys.path.insert(0, os.path.realpath(os.path.dirname(sys.argv[0])) + '/libs/')
 
-import xconfig_utils
-import xconfig_layers
+
+import xconfig.utils
+import xconfig.layers
 
 
 def GetArgs():
