@@ -12,9 +12,9 @@ import imp
 import ast
 from collections import defaultdict
 
-sys.path.insert(0, 'steps/nnet3/libs/')
+sys.path.insert(0, 'steps/nnet3/libs/xconfig')
 # the following is in case we weren't running this from the normal directory.
-sys.path.insert(0, os.path.realpath(os.path.dirname(sys.argv[0])) + '/libs/')
+sys.path.insert(0, os.path.realpath(os.path.dirname(sys.argv[0])) + '/libs/xconfig')
 
 import xconfig_utils
 import xconfig_layers
@@ -25,9 +25,9 @@ def GetArgs():
     parser = argparse.ArgumentParser(description='Reads an xconfig file and creates config files '
                                      'for neural net creation and training',
                                      epilog='Search egs/*/*/local/nnet3/*sh for examples')
-    parser.add_argument('xconfig_file',
+    parser.add_argument('--xconfig-file', required=True,
                         help='Filename of input xconfig file')
-    parser.add_argument('config_dir',
+    parser.add_argument('--config-dir', required=True,
                         help='Directory to write config files and variables')
 
     print(' '.join(sys.argv))

@@ -7,7 +7,7 @@ import sys
 import traceback
 import time
 import argparse
-import xconfig_utils
+import utils
 
 
 # A base-class for classes representing layers of xconfig files.
