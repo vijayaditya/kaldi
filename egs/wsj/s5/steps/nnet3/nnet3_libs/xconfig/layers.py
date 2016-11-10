@@ -345,7 +345,8 @@ class XconfigOutputLayer(XconfigLayerBase):
                         'include-log-softmax':True, # this would be false for chain models
                         'objective-type':'linear', # see Nnet::ProcessOutputNodeConfigLine in nnet-nnet.cc for other options
                         'learning-rate-factor':1.0, # will be different in chain models
-                        'presoftmax-scale-file':None # used in DNN (not RNN) training using frame-level objfns}
+                        'presoftmax-scale-file':None # used in DNN (not RNN) training using frame-level objfns
+                        }
 
     def CheckConfigs(self):
         if self.config['dim'] <= 0:
