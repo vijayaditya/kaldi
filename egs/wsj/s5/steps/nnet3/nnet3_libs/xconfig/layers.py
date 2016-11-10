@@ -16,7 +16,7 @@ import utils
 class XconfigLayerBase(object):
     # Constructor.
     # first_token is the first token on the xconfig line, e.g. 'affine-layer'.f
-    # parameters is a dict like:
+    # key_to_value is a dict like:
     # { 'name':'affine1', 'input':'Append(0, 1, 2, ReplaceIndex(ivector, t, 0))', 'dim=1024' }.
     # The only required and 'special' values that are dealt with directly at this level, are
     # 'name' and 'input'.
@@ -64,7 +64,7 @@ class XconfigLayerBase(object):
         for key in self.GetInputDescriptorNames():
             if not key in self.config:
                 raise RuntimeError("{0}: object of type {1} needs to override "
-                                   "GetDescriptorConfigs()".format(sys.argv[0],
+                                   "GetInputDescriptorNames()".format(sys.argv[0],
                                                                    str(type(self))))
             descriptor_string = self.config[key]  # input string.
             assert isinstance(descriptor_string, str)
@@ -112,8 +112,8 @@ class XconfigLayerBase(object):
     # object was initialized, in self.descriptors; this function just copies them
     # back to the config.
     def NormalizeDescriptors(self):
-        for key,tuple in self.descriptors.items():
-            self.config[key] = tuple[2]  # desc_norm_str
+        for key, desc_str_dict in self.descriptors.items():
+            self.config[key] = desc_str_dict['normalized-string']  # desc_norm_str
 
     # This function, which is a convenience function intended to be called from
     # child classes, converts a string representing a descriptor
@@ -344,7 +344,7 @@ class XconfigOutputLayer(XconfigLayerBase):
                         'dim':-1,
                         'include-log-softmax':True, # this would be false for chain models
                         'objective-type':'linear', # see Nnet::ProcessOutputNodeConfigLine in nnet-nnet.cc for other options
-                        'learning-rate-factor':1.0, # will be different in chain models
+                        'learning-rate-factor':1.0,
                         'presoftmax-scale-file':None # used in DNN (not RNN) training using frame-level objfns
                         }
 
@@ -383,8 +383,8 @@ class XconfigOutputLayer(XconfigLayerBase):
         # normalized-string, output-string).
         # by 'descriptor_final_string' we mean a string that can appear in
         # config-files, i.e. it contains the 'final' names of nodes.
-        descriptor_final_string = self.descriptors['input'][3]
-        input_dim = self.descriptors['input'][1]
+        descriptor_final_string = self.descriptors['input']['final-string']
+        input_dim = self.descriptors['input']['dim']
         output_dim = self.config['dim']
         objective_type = self.config['objective-type']
         learning_rate_factor = self.config['learning-rate-factor']
@@ -406,7 +406,7 @@ class XconfigOutputLayer(XconfigLayerBase):
                     self.name, descriptor_final_string))
             ans.append((config_name, line))
             cur_node = '{0}.affine'.format(self.name)
-            if presoftmax_scale_file != '' and config_name == 'all':
+            if presoftmax_scale_file is not None and config_name == 'all':
                 # don't use the presoftmax-scale in 'ref.config' since that file won't exist at the
                 # time we evaluate it.  (ref.config is used to find the left/right context).
                 line = ('component name={0}.fixed-scale type=FixedScaleComponent scales={1}'.format(
@@ -429,10 +429,11 @@ class XconfigOutputLayer(XconfigLayerBase):
         return ans
 
 
-# This class is for lines like
+# This class is for parsing lines like
 #  'relu-renorm-layer name=layer1 dim=1024 input=Append(-3,0,3)'
 # or:
 #  'sigmoid-layer name=layer1 dim=1024 input=Append(-3,0,3)'
+# which specify addition of an affine component and a sequence of non-linearities.
 # Here, the name of the layer itself dictates the sequence of nonlinearities
 # that are applied after the affine component; the name should contain some
 # combination of 'relu', 'renorm', 'sigmoid' and 'tanh',
@@ -449,8 +450,6 @@ class XconfigOutputLayer(XconfigLayerBase):
 #   dim=-1                   [Output dimension of layer, e.g. 1024]
 #   self-repair-scale=1.0e-05  [Affects relu, sigmoid and tanh layers.]
 #
-# Configuration values that we might one day want to add here, but which we
-# don't yet have, include target-rms (affects 'renorm' component).
 class XconfigBasicLayer(XconfigLayerBase):
     def __init__(self, first_token, key_to_value, prev_names = None):
         # Here we just list some likely combinations.. you can just add any
@@ -462,15 +461,21 @@ class XconfigBasicLayer(XconfigLayerBase):
     def SetDefaultConfigs(self):
         # note: self.config['input'] is a descriptor, '[-1]' means output
         # the most recent layer.
-        self.config = { 'input':'[-1]', 'dim':-1, 'self-repair-scale':1.0e-05 }
+        self.config = { 'input':'[-1]',
+                        'dim':-1,
+                        'self-repair-scale':1.0e-05,
+                        'norm-target-rms':1.0}
 
     def CheckConfigs(self):
         if self.config['dim'] <= 0:
             raise RuntimeError("In {0}, dim has invalid value {1}".format(self.layer_type,
                                                                           self.config['dim']))
         if self.config['self-repair-scale'] < 0.0 or self.config['self-repair-scale'] > 1.0:
-            raise RuntimeError("In {0}, objective-type has invalid value {0}".format(
+            raise RuntimeError("In {0}, self-repair-scale has invalid value {0}".format(
                     self.layer_type, self.config['self-repair-scale']))
+        if self.config['norm-target-rms'] < 0.0:
+            raise RuntimeError("In {0}, norm-target-rms has invalid value {0}".format(
+                    self.layer_type, self.config['norm-target-rms'])
 
     def OutputName(self, qualifier = None):
         assert qualifier == None
@@ -496,7 +501,7 @@ class XconfigBasicLayer(XconfigLayerBase):
         # normalized-string, output-string).
         # by 'descriptor_final_string' we mean a string that can appear in
         # config-files, i.e. it contains the 'final' names of nodes.
-        descriptor_final_string = self.descriptors['input'][3]
+        descriptor_final_string = self.descriptors['input']['final-string']
         input_dim = self.descriptors['input'][1]
         output_dim = self.config['dim']
         self_repair_scale = self.config['self-repair-scale']

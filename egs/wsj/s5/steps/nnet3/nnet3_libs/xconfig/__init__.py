@@ -22,7 +22,7 @@
 # 'ref.config' : which is a version of the config file used to generate
 #                a model for getting left and right context it doesn't read anything for the
 #                LDA-like transform and/or presoftmax-prior-scale components)
-# 'all.config' : which has the actual config used to initialize the model used
+# 'final.config' : which has the actual config used to initialize the model used
 #                 in training i.e, it has file paths for LDA transform and
 #                 other initialization files
 
