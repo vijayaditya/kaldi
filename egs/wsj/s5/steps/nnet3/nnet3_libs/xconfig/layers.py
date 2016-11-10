@@ -10,12 +10,13 @@ import argparse
 import utils
 
 
+
 # A base-class for classes representing layers of xconfig files.
 # This mainly just sets self.layer_type, self.name and self.config,
 class XconfigLayerBase(object):
     # Constructor.
     # first_token is the first token on the xconfig line, e.g. 'affine-layer'.f
-    # key_to_value is a dict like:
+    # parameters is a dict like:
     # { 'name':'affine1', 'input':'Append(0, 1, 2, ReplaceIndex(ivector, t, 0))', 'dim=1024' }.
     # The only required and 'special' values that are dealt with directly at this level, are
     # 'name' and 'input'.
@@ -60,7 +61,7 @@ class XconfigLayerBase(object):
         # Parse Descriptors and get their dims and their 'final' string form.
         # Put them as 4-tuples (descriptor, string, normalized-string, final-string)
         # in self.descriptors[key]
-        for key in self.GetDescriptorConfigs():
+        for key in self.GetInputDescriptorNames():
             if not key in self.config:
                 raise RuntimeError("{0}: object of type {1} needs to override "
                                    "GetDescriptorConfigs()".format(sys.argv[0],
@@ -72,13 +73,16 @@ class XconfigLayerBase(object):
             desc_norm_str = desc.str()
             # desc_output_str contains the "final" component names, those that
             # appear in the actual config file (i.e. not names like
-            # 'layer.qualifier'); that's how it differs from desc_norm_str.
+            # 'layer.auxiliary_output'); that's how it differs from desc_norm_str.
             # Note: it's possible that the two strings might be the same in
-            # many, even most, cases-- it depends whether OutputName(self, qualifier)
-            # returns self.Name() + '.' + qualifier when qualifier is not None.
+            # many, even most, cases-- it depends whether OutputName(self, auxiliary_output)
+            # returns self.Name() + '.' + auxiliary_output when auxiliary_output is not None.
             # That's up to the designer of the layer type.
             desc_output_str = self.GetStringForDescriptor(desc, all_layers)
-            self.descriptors[key] = (desc, desc_dim, desc_norm_str, desc_output_str)
+            self.descriptors[key] = {'string':desc,
+                                     'normalized-string':desc_norm_str,
+                                     'final-string':desc_output_str,
+                                     'dim':desc_dim}
             # the following helps to check the code by parsing it again.
             desc2 = self.ConvertToDescriptor(desc_norm_str, all_layers)
             desc_norm_str2 = desc2.str()
@@ -157,41 +161,43 @@ class XconfigLayerBase(object):
     def CheckConfigs(self):
         pass
 
-    # This function, which may be (but usually will not have to be) overrideden
-    # by child classes, returns a list of keys/names of config variables that
-    # will be interpreted as Descriptors.  It is used in the function
-    # 'NormalizeDescriptors()'.  This implementation will work
-    # layer types whose only Descriptor-valued config is 'input'.
+    # This function, which may be (but usually will not have to be) overridden
+    # by child classes, returns a list of names of the input descriptors
+    # expected by this component. Typically this would just return ['input'] as
+    # most layers just have one 'input'. However some layers might require more
+    # inputs (e.g. cell state of previous LSTM layer in Highway LSTMs).
+    # It is used in the function 'NormalizeDescriptors()'.
+    # This implementation will work for layer types whose only
+    # Descriptor-valued config is 'input'.
 
-    # If a child class adds more config variables that are interpreted as
-    # descriptors (e.g. to read auxiliary inputs), or does not have an input
+    # If a child class adds more inputs, or does not have an input
     # (e.g. the XconfigInputLayer), it should override this function's
     # implementation to something like: `return ['input', 'input2']`
-    def GetDescriptorConfigs(self):
+    def GetInputDescriptorNames(self):
         return [ 'input' ]
 
-    # Returns a list of all qualifiers (meaning auxiliary outputs) that this
+    # Returns a list of all auxiliary outputs that this
     # layer supports.  These are either 'None' for the regular output, or a
     # string (e.g. 'projection' or 'memory_cell') for any auxiliary outputs that
     # the layer might provide.  Most layer types will not need to override this.
-    def Qualifiers(self):
+    def AuxiliaryOutputs(self):
         return [ None ]
 
-    # Called with qualifier == None, this returns the component-node name of the
+    # Called with auxiliary_output == None, this returns the component-node name of the
     # principal output of the layer (or if you prefer, the text form of a
     # descriptor that gives you such an output; such as Append(some_node,
     # some_other_node)).
-    # The 'qualifier' argument is a text value that is designed for extensions
+    # The 'auxiliary_output' argument is a text value that is designed for extensions
     # to layers that have additional auxiliary outputs.  For example, to implement
     # a highway LSTM you need the memory-cell of a layer, so you might allow
     # qualifier='memory_cell' for such a layer type, and it would return the
     # component node or a suitable Descriptor: something like 'lstm3.c_t'
-    def OutputName(self, qualifier = None):
+    def OutputName(self, auxiliary_output = None):
         raise RuntimeError("Child classes must override OutputName()")
 
-    # The dimension that this layer outputs.  The 'qualifier' parameter is for
+    # The dimension that this layer outputs.  The 'auxiliary_output' parameter is for
     # layer types which support auxiliary outputs.
-    def OutputDim(self, qualifier = None):
+    def OutputDim(self, auxiliary_output = None):
         raise RuntimeError("Child classes must override OutputDim()")
 
     # This function returns lines destined for the 'full' config format, as
@@ -224,27 +230,24 @@ class XconfigInputLayer(XconfigLayerBase):
         if self.config['dim'] <= 0:
             raise RuntimeError("Dimension of input-layer '{0}' is not set".format(self.name))
 
-    def GetDescriptorConfigs(self):
+    def GetInputDescriptorNames(self):
         return []  # there is no 'input' field in self.config.
 
-    def OutputName(self, qualifier = None):
-        assert qualifier is None
+    def OutputName(self, auxiliary_outputs = None):
+        # there are no auxiliary outputs as this layer will just pass the input
+        assert auxiliary_outputs is None
         return self.name
 
-    def OutputDim(self, qualifier = None):
-        assert qualifier is None
+    def OutputDim(self, auxiliary_outputs = None):
+        # there are no auxiliary outputs as this layer will just pass the input
+        assert auxiliary_outputs is None
         return self.config['dim']
 
     def GetFullConfig(self):
-        # the input layers need to be printed in 'init.config' (which
-        # initializes the neural network prior to the LDA), in 'ref.config',
-        # which is a version of the config file used for getting left and right
-        # context (it doesn't read anything for the LDA-like transform and/or
-        # presoftmax-prior-scale components)
-        # In 'full.config' we write everything, this is just for reference,
-        # and also for cases where we don't use the LDA-like transform.
+        # unlike other layers the input layers need to be printed in 'init.config'
+        # (which initializes the neural network prior to the LDA)
         ans = []
-        for config_name in [ 'init', 'ref', 'all' ]:
+        for config_name in [ 'init', 'ref', 'final' ]:
             ans.append( (config_name,
                          'input-node name={0} dim={1}'.format(self.name,
                                                               self.config['dim'])))
@@ -269,14 +272,16 @@ class XconfigTrivialOutputLayer(XconfigLayerBase):
     def CheckConfigs(self):
         pass  # nothing to check; descriptor-parsing can't happen in this function.
 
-    def OutputName(self, qualifier = None):
-        assert qualifier is None
+    def OutputName(self, auxiliary_outputs = None):
+        # there are no auxiliary outputs as this layer will just pass the output
+        # of the previous layer
+        assert auxiliary_outputs is None
         return self.name
 
-    def OutputDim(self, qualifier = None):
-        assert qualifier is None
+    def OutputDim(self, auxiliary_outputs = None):
+        assert auxiliary_outputs is None
         # note: each value of self.descriptors is (descriptor, dim, normalized-string, output-string).
-        return self.descriptors['input'][1]
+        return self.descriptors['input']['dim']
 
     def GetFullConfig(self):
         # the input layers need to be printed in 'init.config' (which
@@ -294,7 +299,7 @@ class XconfigTrivialOutputLayer(XconfigLayerBase):
         # config-files, i.e. it contains the 'final' names of nodes.
         descriptor_final_str = self.descriptors['input'][3]
 
-        for config_name in [ 'ref', 'all' ]:
+        for config_name in ['init', 'ref', 'final' ]:
             ans.append( (config_name,
                          'output-node name={0} input={1}'.format(
                         self.name, descriptor_final_str)))
@@ -335,9 +340,12 @@ class XconfigOutputLayer(XconfigLayerBase):
     def SetDefaultConfigs(self):
         # note: self.config['input'] is a descriptor, '[-1]' means output
         # the most recent layer.
-        self.config = { 'input':'[-1]', 'dim':-1, 'include-log-softmax':True,
-                        'objective-type':'linear', 'learning-rate-factor':1.0,
-                        'include-log-softmax':True, 'presoftmax-scale-file':'' }
+        self.config = { 'input':'[-1]',
+                        'dim':-1,
+                        'include-log-softmax':True, # this would be false for chain models
+                        'objective-type':'linear', # see Nnet::ProcessOutputNodeConfigLine in nnet-nnet.cc for other options
+                        'learning-rate-factor':1.0, # will be different in chain models
+                        'presoftmax-scale-file':None # used in DNN (not RNN) training using frame-level objfns}
 
     def CheckConfigs(self):
         if self.config['dim'] <= 0:
@@ -352,12 +360,12 @@ class XconfigOutputLayer(XconfigLayerBase):
 
     # you cannot access the output of this layer from other layers... see
     # comment in OutputName for the reason why.
-    def Qualifiers(self):
+    def AuxiliaryOutputs(self):
         return []
 
-    def OutputName(self, qualifier = None):
+    def OutputName(self, auxiliary_outputs = None):
         # Note: nodes of type output-node in nnet3 may not be accessed in Descriptors,
-        # so calling this with qualifier=None doesn't make sense.  But it might make
+        # so calling this with auxiliary_outputs=None doesn't make sense.  But it might make
         # sense to make the output of the softmax layer and/or the output of the
         # affine layer available as inputs to other layers, in some circumstances.
         # we'll implement that when it's needed.
@@ -425,9 +433,9 @@ class XconfigOutputLayer(XconfigLayerBase):
 # or:
 #  'sigmoid-layer name=layer1 dim=1024 input=Append(-3,0,3)'
 # Here, the name of the layer itself dictates the sequence of nonlinearities
-# that are applied; the name should contain some combination of 'relu', 'renorm',
-# 'sigmoid' and 'tanh', and these nonlinearities will be added after the
-# affine component.
+# that are applied after the affine component; the name should contain some
+# combination of 'relu', 'renorm', 'sigmoid' and 'tanh',
+# and these nonlinearities will be added along with the affine component.
 #
 # The dimension specified is the output dim; the input dim is worked out from the input descriptor.
 # This class supports only nonlinearity types that do not change the dimension; we can create
@@ -442,7 +450,7 @@ class XconfigOutputLayer(XconfigLayerBase):
 #
 # Configuration values that we might one day want to add here, but which we
 # don't yet have, include target-rms (affects 'renorm' component).
-class XconfigSimpleLayer(XconfigLayerBase):
+class XconfigBasicLayer(XconfigLayerBase):
     def __init__(self, first_token, key_to_value, prev_names = None):
         # Here we just list some likely combinations.. you can just add any
         # combinations you want to use, to this list.
@@ -606,6 +614,60 @@ class XconfigFixedAffineLayer(XconfigLayerBase):
         ans.append(('ref', line))
         return ans
 
+
+# This class is for lines like
+#   'lstm-layer name=lstm1 input=Append(-1,-2) delay=-3'
+class XconfigLstmLayer(XconfigLayerBase):
+    def __init__(self, first_token, key_to_value, prev_names = None):
+        assert first_token == "lstm"
+        XconfigLayerBase.__init__(self, first_token, key_to_value, prev_names)
+
+    def SetDefaultConfigs(self):
+        self.config = {'input':'[-1]',
+                        'cell-dim':-1,
+                        'clipping-threshold':30.0,
+                        'norm-based-clipping':True,
+                        'delay':-1,
+                        'ng-per-element-scale-options':'',
+                        'ng-affine-options':'',
+                        'self-repair-scale-nonlinearity':0.00001,
+                        'self-repair-scale-clipgradient':1.0 }
+
+    def CheckConfigs(self):
+        if self.config['cell-dim'] <= 0:
+            raise RuntimeError("In {0}, cell-dim has invalid value {1}.".format(self.layer_type,
+                                                                               self.config['dim']))
+        for key in ['self-repair-scale-nonlinearity', 'self-repair-scale-clipgradient']:
+            if self.config[key] < 0.0 or self.config[key] > 1.0:
+                raise RuntimeError("In {0}, {1} has invalid value {2}.".format(self.layer_type,
+                                                                               key,
+                                                                               self.config[key]))
+    def ParseName(self):
+        split_layer_name = self.layer_type.split('-')
+        assert split_layer_name[-1] == 'layer'
+        return split_layer_name
+
+    def OutputName(self, auxiliary_outputs = None):
+        split_layer_name
+
+    def OutputDim(self, auxiliary_outputs = None):
+        projection_dim = self.config['recurrent-projection-dim'] + \
+                         self.config['non-recurrent-projection-dim']
+        if projection_dim > 0:
+            return projection_dim
+        return self.config['cell-dim']
+
+    def GetFullConfig(self):
+        ans = []
+
+
+
+# This class is an extension LSTM layer and supports output projection
+# 'lstmp-layer name=lstmp1 input=Append(-1,-2) delay=-3 recurrent-projection=256 non-recurrent-projection=256'
+class XconfigLstmLayerProjected(XconfigLstmLayer):
+    pass
+
+
 # Converts a line as parsed by ParseConfigLine() into a first
 # token e.g. 'input-layer' and a key->value map, into
 # an objet inherited from XconfigLayerBase.
@@ -620,7 +682,7 @@ def ParsedLineToXconfigLayer(first_token, key_to_value, prev_names):
     elif first_token == 'output-layer':
         return XconfigOutputLayer(first_token, key_to_value, prev_names)
     elif first_token in [ 'relu-layer', 'relu-renorm-layer', 'sigmoid-layer', 'tanh-layer' ]:
-        return XconfigSimpleLayer(first_token, key_to_value, prev_names)
+        return XconfigBasicLayer(first_token, key_to_value, prev_names)
     elif first_token == 'fixed-affine-layer':
         return XconfigFixedAffineLayer(first_token, key_to_value, prev_names)
     else:
