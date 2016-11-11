@@ -1,5 +1,4 @@
-def AuxiliaryOutputs(self):
-    return from __future__ import print_function
+from __future__ import print_function
 import subprocess
 import logging
 import math
@@ -741,7 +740,7 @@ class XconfigLstmpLayer(XconfigLayerBase):
         affine_str = self.config['ng-affine-options']
         # Natural gradient per element scale parameters
         # TODO: decide if we want to keep exposing these options
-        if re.search('param-mean', ng_per_element_scale_options) is None and
+        if re.search('param-mean', ng_per_element_scale_options) is None and \
            re.search('param-stddev', ng_per_element_scale_options) is None:
            ng_per_element_scale_options += " param-mean=0.0 param-stddev=1.0 "
         pes_str = ng_per_element_scale_options
