@@ -671,6 +671,7 @@ class XconfigBasicLayer(XconfigLayerBase):
 
 
     def _generate_config(self):
+
         split_layer_name = self.layer_type.split('-')
         assert split_layer_name[-1] == 'layer'
         nonlinearities = split_layer_name[:-1]
