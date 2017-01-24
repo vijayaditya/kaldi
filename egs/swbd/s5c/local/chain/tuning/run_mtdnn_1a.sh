@@ -5,10 +5,10 @@ set -e
 # configs for 'chain'
 affix=
 stage=12
-train_stage=-3
+train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/mtdnn_1a  # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/mtdnn_1a_new  # Note: _sp will get added to this if $speed_perturb == true.
 decode_iter=
 lattice_beam=
 

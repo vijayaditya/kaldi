@@ -4,8 +4,8 @@ set -e
 
 # configs for 'chain'
 affix=
-stage=12
-train_stage=-10
+stage=13
+train_stage=0
 get_egs_stage=-10
 speed_perturb=true
 dir=exp/chain/mtdnn_1b  # Note: _sp will get added to this if $speed_perturb == true.
