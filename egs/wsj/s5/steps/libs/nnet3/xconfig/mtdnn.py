@@ -8,7 +8,6 @@
 import re
 
 from libs.nnet3.xconfig.basic_layers import XconfigLayerBase
-from libs.nnet3.xconfig.utils import XconfigParserError as xparser_error
 from libs.nnet3.xconfig.layers import XconfigTdnnLayer
 
 class XconfigMtdnnLayer(XconfigTdnnLayer):
@@ -33,7 +32,7 @@ class XconfigMtdnnLayer(XconfigTdnnLayer):
 
         super(XconfigMtdnnLayer, self).check_configs()
         if self.config['operating-time-period'] < 1:
-            raise xparser_error('Invalid value for operating-time-period')
+            raise RunTimeError('Invalid value for operating-time-period')
         # get_rate_params performs all the checks
         self.get_rate_params()
 
@@ -55,11 +54,11 @@ class XconfigMtdnnLayer(XconfigTdnnLayer):
             try:
                 params[key] = map(lambda x: int(x), value.split(","))
             except ValueError:
-                raise xparser_error("Invalid value for {0}: {1}"
+                raise RunTimeError("Invalid value for {0}: {1}"
                                     "".format(key, value))
 
         if len(params['time-periods']) != len(params['rate-dims']):
-            raise xparser_error("time-periods and rate-dims should have the"
+            raise RunTimeError("time-periods and rate-dims should have the"
                                 " same number of elements.")
 
         rate_params = {}
@@ -67,11 +66,11 @@ class XconfigMtdnnLayer(XconfigTdnnLayer):
             tp = params['time-periods'][i]
             dim = params['rate-dims'][i]
             if dim <= 0:
-                raise xparser_error("Invalid value {0} in rate-dims."
-                                    "".format(dim), self(str))
+                raise RunTimeError("Invalid value {0} in rate-dims."
+                                    "".format(dim))
             if tp <= 1:
-                raise xparser_error("Invalid value {0} in time-periods."
-                                    "".format(tp), self(str))
+                raise RunTimeError("Invalid value {0} in time-periods."
+                                    "".format(tp))
             rate_params[tp] = dim
 
         return rate_params
