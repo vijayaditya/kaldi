@@ -27,7 +27,6 @@ class XconfigTdnnLayer(XconfigBasicLayer):
     def set_default_configs(self):
 
         super(XconfigTdnnLayer, self).set_default_configs()
-
         self.config['splice-indexes'] = ''
         self.config['subset-dim'] = -1
 
