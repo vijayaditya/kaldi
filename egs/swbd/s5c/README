@@ -4,19 +4,21 @@ SWBD : egs/swbd/s5c
 
 scripts :
 
-TDNN-A
-TDNN-B
-TDNN-C
-TDNN-D
+TDNN-A - local/chain/tuning/run_tdnn_7k.sh
+TDNN-B - local/chain/tuning/run_tdnn_7l.sh
+TDNN-C - local/chain/tuning/run_tdnn_7m.sh
+TDNN-D - local/chain/tuning/run_tdnn_7h.sh
 
-TDNN-LSTM-A
-TDNN-LSTM-B
-TDNN-LSTM-C
-TDNN-BLSTM-A
-TDNN-BLSTM-B
+TDNN-LSTM-A - local/chain/tuning/run_tdnn_lstm_1l.sh
+TDNN-LSTM-B - local/chain/tuning/run_tdnn_lstm_1m_v.sh
+TDNN-LSTM-C - local/chain/tuning/run_tdnn_lstm_1e.sh
+TDNN-BLSTM-A - local/chain/tuning/run_tdnn_blstm_1b.sh
+TDNN-BLSTM-B - local/chain/tuning/run_tdnn_blstm_1d.sh
+TDNN-BLSTM-C - local/chain/tuning/run_tdnn_blstm_1c.sh
 
-LFR-LSTM
-LFR-BLSTM
 
-MFR-LSTM
-MFR-BLSTM
+LFR-LSTM - local/chain/tuning/run_lstm_6k.sh
+LFR-BLSTM - local/chain/tuning/run_blstm_6k.sh
+
+MFR-LSTM - local/chain/tuning/run_lstm_6l.sh
+MFR-BLSTM - local/chain/tuning/run_blstm_6m.sh

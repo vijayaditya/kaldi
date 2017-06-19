@@ -6,8 +6,8 @@
 set -e
 
 # configs for 'chain'
-stage=12
-train_stage=-10
+stage=13
+train_stage=26
 get_egs_stage=-10
 speed_perturb=true
 dir=exp/chain/blstm_6m  # Note: _sp will get added to this if $speed_perturb == true.

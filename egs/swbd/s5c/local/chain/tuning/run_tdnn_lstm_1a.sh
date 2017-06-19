@@ -19,7 +19,7 @@
 set -e
 
 # configs for 'chain'
-stage=12
+stage=16
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
@@ -237,5 +237,36 @@ if [ $stage -le 15 ]; then
       ) &
   done
 fi
+
+if [ $stage -le 16 ]; then
+  # looped decoding.  Note: this does not make sense for BLSTMs or other
+  # backward-recurrent setups, and for TDNNs and other non-recurrent there is no
+  # point doing it because it would give identical results to regular decoding.
+  rm $dir/.error 2>/dev/null || true
+  for decode_set in train_dev eval2000; do
+    (
+      steps/nnet3/decode_looped.sh \
+         --acwt 1.0 --post-decode-acwt 10.0 \
+         --nj 50 --cmd "$decode_cmd" $iter_opts \
+         --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
+         $graph_dir data/${decode_set}_hires \
+         $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_sw1_tg_looped || exit 1;
+      if $has_fisher; then
+          steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
+            data/lang_sw1_{tg,fsh_fg} data/${decode_set}_hires \
+            $dir/decode_${decode_set}${decode_iter:+_$decode_iter}_sw1_{tg,fsh_fg}_looped || exit 1;
+      fi
+      ) &
+  done
+  wait
+  if [ -f $dir/.error ]; then
+    echo "$0: something went wrong in looped decoding"
+    exit 1
+  fi
+fi
+
+
+
+
 wait;
 exit 0;
